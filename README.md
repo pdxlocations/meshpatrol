@@ -70,7 +70,7 @@ On startup, MeshPatrol:
 
 - connects to your Meshtastic interface (`SerialInterface` or `TCPInterface`)
 - subscribes to `meshtastic.receive`
-- starts a web dashboard at `http://127.0.0.1:5050` (by default)
+- starts a web dashboard on `0.0.0.0:5050` (by default), accessible from your LAN via `http://<host-ip>:5050`
 
 Stop with `Ctrl+C`.
 
@@ -93,9 +93,8 @@ APP_SETTINGS = {
     "alert_template": "...",
     "log_level": "INFO",
     "web_ui": True,
-    "web_host": "127.0.0.1",
+    "web_host": "0.0.0.0",
     "web_port": 5050,
-    "web_refresh_seconds": 2,
 }
 ```
 

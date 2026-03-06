@@ -54,7 +54,7 @@ APP_SETTINGS: dict[str, Any] = {
     ),
     "log_level": "INFO",
     "web_ui": True,
-    "web_host": "127.0.0.1",
+    "web_host": "0.0.0.0",
     "web_port": 5050,
 }
 
