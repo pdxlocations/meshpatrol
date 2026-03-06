@@ -20,7 +20,13 @@ MeshPatrol is a Meshtastic packet-monitoring bot that:
 
 ## Installation
 
-### Install from source (recommended for now)
+### Install from PyPI (recommended)
+
+```bash
+pip install meshpatrol
+```
+
+### Install from source
 
 ```bash
 git clone https://github.com/pdxlocations/meshpatrol.git
@@ -29,12 +35,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e .
-```
-
-### Alternative: install from requirements
-
-```bash
-pip install -r requirements.txt
 ```
 
 ## Running MeshPatrol
