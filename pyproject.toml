@@ -1,0 +1,27 @@
+[project]
+name = "meshpatrol"
+version = "0.0.1"
+description = "Bot for Meshtastic Networks to monitor high traffic users and kindly ask them to check settings."
+authors = [
+    {name = "Ben Lipsey",email = "ben@pdxlocations.com"}
+]
+license = "GPL-3.0-only"
+readme = "README.md"
+requires-python = ">=3.9,<3.15"
+dependencies = [
+    "meshtastic",
+    "meshdb",
+    "PyPubSub",
+    "Flask"
+]
+
+[project.urls]
+Homepage = "https://github.com/pdxlocations/meshpatrol"
+Issues = "https://github.com/pdxlocations/meshpatrol/issues"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+meshpatrol = "meshpatrol.__main__:run"

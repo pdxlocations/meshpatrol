@@ -1,0 +1,9 @@
+venv/
+.venv/
+__pycache__/
+.DS_Store
+dist/
+database/*.db
+database/*.db-shm
+database/*.db-wal
+config/thresholds.json
