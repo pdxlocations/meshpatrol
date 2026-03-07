@@ -5,8 +5,8 @@ MeshPatrol is a Meshtastic packet-monitoring bot that:
 - subscribes to incoming packets from a Meshtastic node (serial or TCP)
 - stores packet payloads using `meshdb`
 - tracks per-node and per-packet-type hourly counts in SQLite
-- sends a direct message (DM) to nodes that exceed configured hourly thresholds
-- serves a realtime dashboard over HTTP (rolling 24-hour window)
+- sends a direct message (DM) to nodes that exceed configured thresholds
+- serves a dashboard over HTTP (window follows configured threshold unit)
 
 ## Requirements
 
@@ -85,9 +85,10 @@ APP_SETTINGS = {
     "port": None,
     "tcp_hostname": "127.0.0.1",
     "tcp_port": 4403,
-    "meshdb_path": "database/mesh_packets.db",
-    "counter_db_path": "database/packet_counters.db",
-    "thresholds_path": "config/thresholds.json",
+    "meshdb_path": "./meshpatrol/databases/mesh_packets.db",
+    "counter_db_path": "./meshpatrol/databases/packet_counters.db",
+    "thresholds_path": "./meshpatrol/thresholds.json",
+    "threshold_unit": "hour",
     "default_threshold": 120,
     "threshold_overrides": [],
     "alert_template": "...",
@@ -104,8 +105,9 @@ APP_SETTINGS = {
 - `port`: serial device path. Use `None` for Meshtastic auto-detect.
 - `tcp_hostname` / `tcp_port`: TCP destination when `interface="tcp"`.
 - `thresholds_path`: JSON file for threshold configuration.
+- `threshold_unit`: legacy fallback default unit if missing from thresholds JSON (`"hour"` or `"24h"`).
 - `default_threshold` / `threshold_overrides`: legacy fallback only, used if `thresholds_path` file is missing.
-- `alert_template`: DM text. Supports `{node_id}`, `{packet_type}`, `{count}`, `{threshold}`, `{hour_bucket}`.
+- `alert_template`: DM text. Supports `{node_id}`, `{packet_type}`, `{count}`, `{threshold}`, `{hour_bucket}`, `{window_label}`, `{threshold_unit}`.
 - `web_ui`: enable/disable dashboard.
 - `meshdb_path`: SQLite file used by `meshdb` packet storage.
 - `counter_db_path`: SQLite file used for rate counters and alert history.
@@ -116,39 +118,46 @@ APP_SETTINGS = {
 
 ```json
 {
+  "threshold_unit": "hour",
   "default_threshold": 120,
   "overrides": {
     "POSITION_APP": 300,
-    "TELEMETRY_APP": 180
+    "TELEMETRY_APP": {
+      "threshold": 180,
+      "unit": "24h"
+    }
   }
 }
 ```
 
-- `default_threshold`: fallback packets/hour threshold for packet types without an override.
-- `overrides`: per-port thresholds keyed by Meshtastic port name (for example `POSITION_APP`).
+- `threshold_unit`: default unit (`"hour"` or `"24h"`) for entries that do not specify a unit.
+- `default_threshold`: fallback threshold value in the default unit for packet types without an override.
+- `overrides`: per-port thresholds keyed by Meshtastic port name. Each value can be:
+  - integer: threshold using default `threshold_unit`
+  - object: `{ "threshold": <int>, "unit": "hour" | "24h" }` for per-port unit override
 
 ## Dashboard and API
 
 When `web_ui` is enabled, MeshPatrol serves:
 
 - `GET /` - HTML dashboard
-- `GET /api/snapshot` - JSON snapshot of rolling 24-hour stats
-- `GET /api/stream` - Server-Sent Events (SSE) realtime stream
+- `GET /api/snapshot` - JSON snapshot for the active threshold windows (hour, 24h, or mixed)
 
 Dashboard includes:
 
-- top nodes by packet count (past 24 hours)
-- totals by packet type (past 24 hours)
+- top nodes by packet count (active window)
+- totals by packet type (active window)
 - configured thresholds
-- node+type breakdown with ETA to threshold (24-hour view)
-- recent alerts (past 24 hours)
+- node+type breakdown with ETA to threshold (per-port threshold unit)
+- recent alerts (active window)
 
 ## Data files
 
-By default, MeshPatrol creates/updates SQLite files in the `database/` folder:
+By default, MeshPatrol creates/updates files in the working-directory `./meshpatrol/` folder:
 
-- `database/mesh_packets.<owner_node_num>.db` (created by `meshdb`)
-- `database/packet_counters.db`
+- `./meshpatrol/databases/mesh_packets.<owner_node_num>.db` (created by `meshdb`)
+- `./meshpatrol/databases/packet_counters.db`
+- `./meshpatrol/thresholds.json`
 
 If WAL mode is active, you may also see `-wal` and `-shm` sidecar files.
 

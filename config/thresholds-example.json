@@ -1,0 +1,48 @@
+{
+  "threshold_unit": "hour",
+  "default_threshold": 120,
+  "overrides": {
+    "UNKNOWN_APP": 60,
+    "TEXT_MESSAGE_APP": 60,
+    "REMOTE_HARDWARE_APP": 30,
+    "POSITION_APP": {
+      "threshold": 100,
+      "unit": "24h"
+    },
+    "NODEINFO_APP": {
+      "threshold": 20,
+      "unit": "24h"
+    },
+    "ROUTING_APP": 60,
+    "ADMIN_APP": 60,
+    "TEXT_MESSAGE_COMPRESSED_APP": 60,
+    "WAYPOINT_APP": 60,
+    "AUDIO_APP": 60,
+    "DETECTION_SENSOR_APP": 60,
+    "ALERT_APP": 60,
+    "KEY_VERIFICATION_APP": 60,
+    "REPLY_APP": 60,
+    "IP_TUNNEL_APP": 60,
+    "PAXCOUNTER_APP": 240,
+    "STORE_FORWARD_PLUSPLUS_APP": 60,
+    "NODE_STATUS_APP": 60,
+    "SERIAL_APP": 60,
+    "STORE_FORWARD_APP": 60,
+    "RANGE_TEST_APP": 60,
+    "TELEMETRY_APP": {
+      "threshold": 50,
+      "unit": "24h"
+    },
+    "ZPS_APP": 60,
+    "SIMULATOR_APP": 60,
+    "TRACEROUTE_APP": 60,
+    "NEIGHBORINFO_APP": 60,
+    "ATAK_PLUGIN": 60,
+    "MAP_REPORT_APP": 60,
+    "POWERSTRESS_APP": 60,
+    "RETICULUM_TUNNEL_APP": 60,
+    "CAYENNE_APP": 60,
+    "PRIVATE_APP": 60,
+    "ATAK_FORWARDER": 60
+  }
+}

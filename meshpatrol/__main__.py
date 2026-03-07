@@ -22,6 +22,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+APP_WORK_DIR = Path.cwd() / "meshpatrol"
+APP_DB_DIR = APP_WORK_DIR / "databases"
+
 APP_SETTINGS: dict[str, Any] = {
     # Interface type: "serial" or "tcp".
     "interface": "serial",
@@ -30,8 +33,8 @@ APP_SETTINGS: dict[str, Any] = {
     # Meshtastic TCP target (used when interface == "tcp").
     "tcp_hostname": "127.0.0.1",
     "tcp_port": 4403,
-    "meshdb_path": "database/mesh_packets.db",
-    "counter_db_path": "database/packet_counters.db",
+    "meshdb_path": str(APP_DB_DIR / "mesh_packets.db"),
+    "counter_db_path": str(APP_DB_DIR / "packet_counters.db"),
     # Ignore packets originating from the connected/local node for counters/alerts.
     "ignore_connected_node": True,
     # Threshold config JSON path. Example schema:
@@ -42,14 +45,16 @@ APP_SETTINGS: dict[str, Any] = {
     #     "TELEMETRY_APP": 180
     #   }
     # }
-    "thresholds_path": "config/thresholds.json",
+    "thresholds_path": str(APP_WORK_DIR / "thresholds.json"),
     # Legacy fallback settings used only if thresholds_path is missing/unreadable.
+    "threshold_unit": "hour",  # "hour" or "24h"
     "default_threshold": 120,
     # Optional per-packet-type legacy overrides: ["POSITION_APP=300", "TELEMETRY_APP=180"]
     "threshold_overrides": [],
     "alert_template": (
         "MeshPatrol alert: node {node_id} sent {count} packets of type "
-        "{packet_type} in local hour {hour_bucket} (threshold {threshold}). "
+        "{packet_type} in {window_label} ending {hour_bucket} "
+        "(threshold {threshold} per {threshold_unit}). "
         "Please check your {packet_type} settings."
     ),
     "log_level": "INFO",
@@ -57,6 +62,8 @@ APP_SETTINGS: dict[str, Any] = {
     "web_host": "0.0.0.0",
     "web_port": 5050,
 }
+
+VALID_THRESHOLD_UNITS = {"hour", "24h"}
 
 
 def parse_tcp_target(value: str) -> tuple[str, int]:
@@ -149,6 +156,23 @@ def iso_to_local_text(value: str | None) -> str:
     return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
+def normalize_threshold_unit(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    aliases = {
+        "hour": "hour",
+        "per_hour": "hour",
+        "1h": "hour",
+        "24h": "24h",
+        "24hr": "24h",
+        "24hours": "24h",
+        "per_24h": "24h",
+    }
+    normalized = aliases.get(text, text)
+    if normalized not in VALID_THRESHOLD_UNITS:
+        raise ValueError("threshold_unit must be 'hour' or '24h'")
+    return normalized
+
+
 def packet_type_of(packet: dict[str, Any]) -> str:
     decoded = packet.get("decoded") or {}
     portnum = decoded.get("portnum") or packet.get("portnum")
@@ -220,26 +244,32 @@ def parse_threshold_overrides(
     overrides: dict[str, Any],
     *,
     default: int,
-) -> dict[str, int]:
+    default_unit: str,
+) -> tuple[dict[str, int], dict[str, str]]:
     thresholds: dict[str, int] = {}
-    for packet_type, count_value in overrides.items():
+    threshold_units: dict[str, str] = {}
+    normalized_default_unit = normalize_threshold_unit(default_unit)
+    for packet_type, override_value in overrides.items():
         pkt_type = str(packet_type).strip()
         if not pkt_type:
             raise ValueError("Threshold overrides cannot contain an empty packet type")
+        count_raw: Any = override_value
+        unit_raw: Any = normalized_default_unit
+        if isinstance(override_value, dict):
+            count_raw = override_value.get("threshold", override_value.get("count"))
+            unit_raw = override_value.get("unit", normalized_default_unit)
         try:
-            count = int(count_value)
+            count = int(count_raw)
         except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"Threshold override for '{pkt_type}' must be an integer"
-            ) from exc
+            raise ValueError(f"Threshold override for '{pkt_type}' must be an integer") from exc
         if count <= 0:
-            raise ValueError(
-                f"Threshold override for '{pkt_type}' must be > 0"
-            )
+            raise ValueError(f"Threshold override for '{pkt_type}' must be > 0")
         thresholds[pkt_type] = count
+        threshold_units[pkt_type] = normalize_threshold_unit(unit_raw)
 
     thresholds["*"] = thresholds.get("*", default)
-    return thresholds
+    threshold_units["*"] = threshold_units.get("*", normalized_default_unit)
+    return thresholds, threshold_units
 
 
 def load_threshold_settings(
@@ -247,7 +277,8 @@ def load_threshold_settings(
     path: Path,
     fallback_default: int,
     fallback_overrides: list[str],
-) -> tuple[int, dict[str, int]]:
+    fallback_threshold_unit: str,
+) -> tuple[int, dict[str, int], str, dict[str, str]]:
     if not path.exists():
         logging.warning(
             "Thresholds file not found at %s; using legacy APP_SETTINGS thresholds",
@@ -255,7 +286,9 @@ def load_threshold_settings(
         )
         default_threshold = int(fallback_default)
         thresholds = parse_thresholds(fallback_overrides, default_threshold)
-        return default_threshold, thresholds
+        threshold_unit = normalize_threshold_unit(fallback_threshold_unit)
+        threshold_units = {key: threshold_unit for key in thresholds}
+        return default_threshold, thresholds, threshold_unit, threshold_units
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -277,8 +310,15 @@ def load_threshold_settings(
     if not isinstance(overrides_raw, dict):
         raise ValueError("overrides must be an object map of TYPE to COUNT")
 
-    thresholds = parse_threshold_overrides(overrides_raw, default=default_threshold)
-    return default_threshold, thresholds
+    threshold_unit = normalize_threshold_unit(
+        payload.get("threshold_unit", fallback_threshold_unit)
+    )
+    thresholds, threshold_units = parse_threshold_overrides(
+        overrides_raw,
+        default=default_threshold,
+        default_unit=threshold_unit,
+    )
+    return default_threshold, thresholds, threshold_unit, threshold_units
 
 
 class PacketCounterDB:
@@ -398,12 +438,51 @@ class PacketCounterDB:
         ).fetchone()
         return bool(row and row[0])
 
+    def count_since(
+        self,
+        *,
+        node_id: str,
+        packet_type: str,
+        since_utc: str,
+    ) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT COALESCE(SUM(count), 0)
+                FROM packet_hourly_counts
+                WHERE node_id = ? AND packet_type = ? AND last_seen_utc >= ?
+                """,
+                (node_id, packet_type, since_utc),
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def was_alerted_since(
+        self,
+        *,
+        node_id: str,
+        packet_type: str,
+        since_utc: str,
+    ) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT 1
+                FROM bot_alert_history
+                WHERE node_id = ? AND packet_type = ? AND alert_utc >= ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (node_id, packet_type, since_utc),
+            ).fetchone()
+            return bool(row)
+
     def close(self) -> None:
         self._conn.close()
 
     def dashboard_snapshot(
         self,
         since_utc: str,
+        one_hour_since_utc: str,
         max_rows: int = 50,
         exclude_node_ids: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -460,15 +539,16 @@ class PacketCounterDB:
                         node_id,
                         packet_type,
                         SUM(count) AS count,
+                        SUM(CASE WHEN last_seen_utc >= ? THEN count ELSE 0 END) AS count_1h,
                         MAX(last_seen_utc) AS last_seen_utc,
                         MAX(alerted_utc) AS alerted_utc
                     FROM packet_hourly_counts
                     WHERE last_seen_utc >= ?""" + node_filter + """
                     GROUP BY node_id, packet_type
-                    ORDER BY count DESC, last_seen_utc DESC
+                    ORDER BY count DESC, count_1h DESC, last_seen_utc DESC
                     LIMIT ?
                     """,
-                    args_prefix + (limit,),
+                    (one_hour_since_utc, *args_prefix, limit),
                 ).fetchall()
             ]
 
@@ -551,8 +631,10 @@ class Config:
     meshdb_path: Path
     counter_db_path: Path
     ignore_connected_node: bool
+    threshold_unit: str
     default_threshold: int
     thresholds: dict[str, int]
+    threshold_units: dict[str, str]
     alert_template: str
     web_ui: bool
     web_host: str
@@ -568,6 +650,9 @@ class PacketMonitorBot:
     def threshold_for(self, packet_type: str) -> int:
         return self.cfg.thresholds.get(packet_type, self.cfg.thresholds["*"])
 
+    def threshold_unit_for(self, packet_type: str) -> str:
+        return self.cfg.threshold_units.get(packet_type, self.cfg.threshold_units["*"])
+
     def on_receive(self, packet: dict[str, Any], interface: Any) -> None:
         now = datetime.now(UTC)
         now_iso = now.isoformat()
@@ -576,7 +661,11 @@ class PacketMonitorBot:
 
         node_id = node_id_of(packet)
         packet_type = packet_type_of(packet)
+        if packet_type == "SIMULATOR_APP":
+            logging.debug("Ignoring simulator packet: node=%s", node_id)
+            return
         threshold = self.threshold_for(packet_type)
+        threshold_unit = self.threshold_unit_for(packet_type)
 
         owner_node_num = self._owner_node_num(interface, packet)
 
@@ -597,23 +686,42 @@ class PacketMonitorBot:
             hour_bucket=hour_bucket_utc,
             seen_utc=now_iso,
         )
+        window_hours = 24 if threshold_unit == "24h" else 1
+        window_start_utc = (now - timedelta(hours=window_hours)).isoformat()
+        window_label = "last 24 hours" if window_hours == 24 else "this hour"
+        count_for_window = count
+        if window_hours == 24:
+            count_for_window = self.counter_db.count_since(
+                node_id=node_id,
+                packet_type=packet_type,
+                since_utc=window_start_utc,
+            )
 
         logging.info(
-            "packet node=%s type=%s count_this_hour=%d threshold=%d",
+            "packet node=%s type=%s count_%s=%d threshold=%d",
             node_id,
             packet_type,
-            count,
+            threshold_unit,
+            count_for_window,
             threshold,
         )
 
-        if count < threshold:
+        if count_for_window < threshold:
             return
-        if self.counter_db.was_alerted(
-            node_id=node_id,
-            packet_type=packet_type,
-            hour_bucket=hour_bucket_utc,
-        ):
-            return
+        if window_hours == 24:
+            if self.counter_db.was_alerted_since(
+                node_id=node_id,
+                packet_type=packet_type,
+                since_utc=window_start_utc,
+            ):
+                return
+        else:
+            if self.counter_db.was_alerted(
+                node_id=node_id,
+                packet_type=packet_type,
+                hour_bucket=hour_bucket_utc,
+            ):
+                return
 
         alert_message = self.cfg.alert_template.format(
             node_id=node_id,
@@ -622,7 +730,9 @@ class PacketMonitorBot:
             hour_bucket=hour_bucket_local,
             hour_bucket_local=hour_bucket_local,
             hour_bucket_utc=hour_bucket_utc,
-            count=count,
+            count=count_for_window,
+            threshold_unit=threshold_unit,
+            window_label=window_label,
         )
 
         sent = self._send_dm(interface, node_id=node_id, message=alert_message)
@@ -637,7 +747,7 @@ class PacketMonitorBot:
             packet_type=packet_type,
             hour_bucket=hour_bucket_utc,
             message=alert_message,
-            count_at_alert=count,
+            count_at_alert=count_for_window,
             alerted_utc=now_iso,
         )
 
@@ -712,15 +822,18 @@ class WebDashboard:
         counter_db: PacketCounterDB,
         meshdb_path: Path,
         thresholds: dict[str, int],
+        threshold_units: dict[str, str],
         host: str,
         port: int,
     ) -> None:
         self._counter_db = counter_db
         self._meshdb_path = meshdb_path
         self._thresholds = thresholds
+        self._threshold_units = threshold_units
         self._host = host
         self._port = port
-        self._window_hours = 1
+        any_24h = any(unit == "24h" for unit in threshold_units.values())
+        self._window_hours = 24 if any_24h else 1
         self._connected_node_id = ""
         self._connected_node_exclude_ids: list[str] = []
         self._thread: threading.Thread | None = None
@@ -751,6 +864,9 @@ class WebDashboard:
 
     def _threshold_for(self, packet_type: str) -> int:
         return int(self._thresholds.get(packet_type, self._thresholds["*"]))
+
+    def _threshold_unit_for(self, packet_type: str) -> str:
+        return str(self._threshold_units.get(packet_type, self._threshold_units["*"]))
 
     @staticmethod
     def _canonical_node_id(node_id: Any) -> str:
@@ -850,11 +966,14 @@ class WebDashboard:
     def _enriched_snapshot(self) -> dict[str, Any]:
         now = datetime.now(UTC)
         window_start = now - timedelta(hours=self._window_hours)
+        one_hour_start = now - timedelta(hours=1)
         data = self._counter_db.dashboard_snapshot(
             window_start.isoformat(),
+            one_hour_start.isoformat(),
             exclude_node_ids=self._connected_node_exclude_ids,
         )
-        elapsed_seconds = max((now - window_start).total_seconds(), 1.0)
+        elapsed_seconds_24h = max((now - window_start).total_seconds(), 1.0)
+        elapsed_seconds_1h = max((now - one_hour_start).total_seconds(), 1.0)
 
         all_node_ids: set[str] = set()
         for section in ("top_nodes", "node_type_rows", "alerts"):
@@ -876,9 +995,15 @@ class WebDashboard:
 
         for row in data["node_type_rows"]:
             packet_type = str(row.get("packet_type") or "UNKNOWN")
-            count = int(row.get("count") or 0)
+            threshold_unit = self._threshold_unit_for(packet_type)
+            count_24h = int(row.get("count") or 0)
+            count_1h = int(row.get("count_1h") or 0)
+            count = count_24h if threshold_unit == "24h" else count_1h
             threshold = self._threshold_for(packet_type)
+            elapsed_seconds = elapsed_seconds_24h if threshold_unit == "24h" else elapsed_seconds_1h
             row["threshold"] = threshold
+            row["threshold_unit"] = threshold_unit
+            row["count"] = count
             row["eta_to_threshold"] = self._eta_to_threshold_text(
                 count=count,
                 threshold=threshold,
@@ -886,11 +1011,15 @@ class WebDashboard:
             )
 
         threshold_rows = [
-            {"packet_type": key, "threshold": int(value)}
+            {
+                "packet_type": key,
+                "threshold": int(value),
+                "unit": self._threshold_unit_for(key),
+            }
             for key, value in sorted(self._thresholds.items(), key=lambda item: item[0])
         ]
         data["thresholds"] = threshold_rows
-        data["window_elapsed_seconds"] = int(elapsed_seconds)
+        data["window_elapsed_seconds"] = int(elapsed_seconds_24h)
         data["window_hours"] = self._window_hours
         data["window_end_utc"] = now.isoformat()
         data["window_start_local"] = iso_to_local_text(data.get("window_start_utc"))
@@ -917,10 +1046,18 @@ class WebDashboard:
             raise RuntimeError("Flask is required when APP_SETTINGS['web_ui'] is True.") from exc
 
         app = Flask(__name__)
+        has_hour = any(unit == "hour" for unit in self._threshold_units.values())
+        has_24h = any(unit == "24h" for unit in self._threshold_units.values())
+        mixed_units = has_hour and has_24h
+        window_label = (
+            "Mixed Units (Up to 24 Hours)"
+            if mixed_units
+            else ("Past 24 Hours" if self._window_hours == 24 else "This Hour")
+        )
 
         @app.get("/")
         def dashboard() -> str:
-            return """<!doctype html>
+            html = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -941,37 +1078,37 @@ class WebDashboard:
     </div>
     <div class="grid">
       <section class="panel panel-top-nodes">
-        <h2>Top Nodes (This Hour)</h2>
+        <h2>Top Nodes (__WINDOW_LABEL__)</h2>
         <table id="topNodes">
-          <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen (Local)</th></tr></thead>
+          <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
       <section class="panel">
-        <h2>Packet Types (This Hour)</h2>
+        <h2>Packet Types (__WINDOW_LABEL__)</h2>
         <table id="byType">
           <thead><tr><th>Type</th><th>Total</th><th>Nodes</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
       <section class="panel" style="grid-column: 1 / -1;">
-        <h2>Node + Type Breakdown (This Hour)</h2>
+        <h2>Node + Type Breakdown (__WINDOW_LABEL__)</h2>
         <table id="nodeType">
-          <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count (Hour)</th><th>Threshold (Hour)</th><th>ETA To Threshold</th><th>Alerted (Local)</th><th>Last Seen (Local)</th></tr></thead>
+          <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
       <section class="panel" style="grid-column: 1 / -1;">
         <h2>Recent Alerts</h2>
         <table id="alerts">
-          <thead><tr><th>Alert Time (Local)</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
+          <thead><tr><th>Alert Time</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
       <section class="panel" style="grid-column: 1 / -1;">
         <h2>Configured Thresholds</h2>
         <table id="thresholds">
-          <thead><tr><th>Type</th><th>Threshold / Hour</th></tr></thead>
+          <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
@@ -1004,6 +1141,11 @@ class WebDashboard:
     }
 
     function render(data) {
+      const formatUnit = (u) => {
+        if (u === '24h') return 'per 24h';
+        if (u === 'hour') return 'per hour';
+        return u || '';
+      };
       const start = data.window_start_local || '-';
       const end = data.window_end_local || data.generated_local || '-';
       document.getElementById('connectedId').textContent = data.connected_node_id || '-';
@@ -1014,8 +1156,16 @@ class WebDashboard:
 
       fillTable('topNodes', data.top_nodes, ['node_id', 'short_name', 'long_name', 'total_count', 'last_seen_local']);
       fillTable('byType', data.by_type, ['packet_type', 'total_count', 'distinct_nodes']);
-      fillTable('thresholds', data.thresholds, ['packet_type', 'threshold']);
-      fillTable('nodeType', data.node_type_rows, ['node_id', 'short_name', 'long_name', 'packet_type', 'count', 'threshold', 'eta_to_threshold', 'alerted_local', 'last_seen_local']);
+      const thresholds = (data.thresholds || []).map((row) => ({
+        ...row,
+        unit: formatUnit(row.unit),
+      }));
+      const nodeTypeRows = (data.node_type_rows || []).map((row) => ({
+        ...row,
+        threshold_unit: formatUnit(row.threshold_unit),
+      }));
+      fillTable('thresholds', thresholds, ['packet_type', 'threshold', 'unit']);
+      fillTable('nodeType', nodeTypeRows, ['node_id', 'short_name', 'long_name', 'packet_type', 'count', 'threshold', 'threshold_unit', 'eta_to_threshold', 'alerted_local', 'last_seen_local']);
       fillTable('alerts', data.alerts, ['alert_local', 'node_id', 'short_name', 'long_name', 'packet_type', 'count_at_alert', 'message']);
     }
 
@@ -1032,6 +1182,9 @@ class WebDashboard:
   </script>
 </body>
 </html>"""
+            return (
+                html.replace("__WINDOW_LABEL__", window_label)
+            )
 
         @app.get("/api/snapshot")
         def api_snapshot() -> Any:
@@ -1073,13 +1226,15 @@ def run(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    thresholds_path = Path(str(app.get("thresholds_path", "config/thresholds.json")))
+    thresholds_path = Path(str(app.get("thresholds_path", str(APP_WORK_DIR / "thresholds.json"))))
+    thresholds_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        default_threshold, thresholds = load_threshold_settings(
+        default_threshold, thresholds, threshold_unit, threshold_units = load_threshold_settings(
             path=thresholds_path,
             fallback_default=int(app["default_threshold"]),
             fallback_overrides=list(app.get("threshold_overrides", [])),
+            fallback_threshold_unit=str(app.get("threshold_unit", "hour")),
         )
     except ValueError as exc:
         logging.error("Invalid threshold settings: %s", exc)
@@ -1093,8 +1248,10 @@ def run(argv: list[str] | None = None) -> int:
         meshdb_path=Path(str(app["meshdb_path"])),
         counter_db_path=Path(str(app["counter_db_path"])),
         ignore_connected_node=bool(app.get("ignore_connected_node", True)),
+        threshold_unit=threshold_unit,
         default_threshold=default_threshold,
         thresholds=thresholds,
+        threshold_units=threshold_units,
         alert_template=str(app["alert_template"]),
         web_ui=bool(app["web_ui"]),
         web_host=str(app["web_host"]),
@@ -1145,6 +1302,7 @@ def run(argv: list[str] | None = None) -> int:
                     counter_db=bot.counter_db,
                     meshdb_path=cfg.meshdb_path,
                     thresholds=cfg.thresholds,
+                    threshold_units=cfg.threshold_units,
                     host=cfg.web_host,
                     port=cfg.web_port,
                 )
