@@ -125,6 +125,22 @@ td:nth-child(1) {
   min-width: 170px;
 }
 
+#nodeType th:nth-child(2),
+#nodeType td:nth-child(2),
+#alerts th:nth-child(3),
+#alerts td:nth-child(3) {
+  min-width: 120px;
+  white-space: nowrap;
+}
+
+#nodeType th:nth-child(5),
+#nodeType td:nth-child(5),
+#alerts th:nth-child(6),
+#alerts td:nth-child(6) {
+  min-width: 78px;
+  white-space: nowrap;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }

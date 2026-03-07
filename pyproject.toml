@@ -1,6 +1,6 @@
 [project]
 name = "meshpatrol"
-version = "0.0.9"
+version = "0.0.10"
 description = "Bot for Meshtastic Networks to monitor high traffic users and kindly ask them to check settings."
 authors = [
     {name = "Ben Lipsey",email = "ben@pdxlocations.com"}

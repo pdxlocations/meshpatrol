@@ -415,6 +415,7 @@ class PacketCounterDB:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._create_schema()
+        self._normalize_existing_node_ids()
 
     def _create_schema(self) -> None:
         self._conn.executescript(
@@ -445,6 +446,89 @@ class PacketCounterDB:
         )
         self._conn.commit()
 
+    @staticmethod
+    def _canonical_node_id(node_id: Any) -> str:
+        as_int = int_from_node_id(node_id)
+        if as_int is not None:
+            return str(as_int)
+        return str(node_id or "").strip()
+
+    def _normalize_existing_node_ids(self) -> None:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT node_id, packet_type, hour_bucket, count, last_seen_utc, alerted_utc
+                FROM packet_hourly_counts
+                """
+            ).fetchall()
+            if not rows:
+                return
+
+            remap: dict[str, str] = {}
+            touched = 0
+            for row in rows:
+                old_node_id = str(row["node_id"] or "").strip()
+                new_node_id = self._canonical_node_id(old_node_id)
+                if not old_node_id or not new_node_id or old_node_id == new_node_id:
+                    continue
+                remap[old_node_id] = new_node_id
+                self._conn.execute(
+                    """
+                    INSERT INTO packet_hourly_counts
+                        (node_id, packet_type, hour_bucket, count, last_seen_utc, alerted_utc)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(node_id, packet_type, hour_bucket)
+                    DO UPDATE SET
+                        count = packet_hourly_counts.count + excluded.count,
+                        last_seen_utc = CASE
+                            WHEN excluded.last_seen_utc > packet_hourly_counts.last_seen_utc
+                            THEN excluded.last_seen_utc
+                            ELSE packet_hourly_counts.last_seen_utc
+                        END,
+                        alerted_utc = CASE
+                            WHEN packet_hourly_counts.alerted_utc IS NULL THEN excluded.alerted_utc
+                            WHEN excluded.alerted_utc IS NULL THEN packet_hourly_counts.alerted_utc
+                            WHEN excluded.alerted_utc > packet_hourly_counts.alerted_utc
+                            THEN excluded.alerted_utc
+                            ELSE packet_hourly_counts.alerted_utc
+                        END
+                    """,
+                    (
+                        new_node_id,
+                        str(row["packet_type"]),
+                        str(row["hour_bucket"]),
+                        int(row["count"]),
+                        str(row["last_seen_utc"]),
+                        row["alerted_utc"],
+                    ),
+                )
+                self._conn.execute(
+                    """
+                    DELETE FROM packet_hourly_counts
+                    WHERE node_id = ? AND packet_type = ? AND hour_bucket = ?
+                    """,
+                    (
+                        old_node_id,
+                        str(row["packet_type"]),
+                        str(row["hour_bucket"]),
+                    ),
+                )
+                touched += 1
+
+            for old_node_id, new_node_id in remap.items():
+                self._conn.execute(
+                    """
+                    UPDATE bot_alert_history
+                    SET node_id = ?
+                    WHERE node_id = ?
+                    """,
+                    (new_node_id, old_node_id),
+                )
+
+            if touched > 0:
+                self._conn.commit()
+                logging.info("Normalized %d counter rows to canonical node IDs", touched)
+
     def increment_and_fetch(
         self,
         *,
@@ -453,6 +537,7 @@ class PacketCounterDB:
         hour_bucket: str,
         seen_utc: str,
     ) -> int:
+        canonical_node_id = self._canonical_node_id(node_id)
         with self._lock:
             self._conn.execute(
                 """
@@ -464,7 +549,7 @@ class PacketCounterDB:
                     count = count + 1,
                     last_seen_utc = excluded.last_seen_utc
                 """,
-                (node_id, packet_type, hour_bucket, seen_utc),
+                (canonical_node_id, packet_type, hour_bucket, seen_utc),
             )
             row = self._conn.execute(
                 """
@@ -472,7 +557,7 @@ class PacketCounterDB:
                 FROM packet_hourly_counts
                 WHERE node_id = ? AND packet_type = ? AND hour_bucket = ?
                 """,
-                (node_id, packet_type, hour_bucket),
+                (canonical_node_id, packet_type, hour_bucket),
             ).fetchone()
             self._conn.commit()
             return int(row[0]) if row else 0
@@ -487,6 +572,7 @@ class PacketCounterDB:
         count_at_alert: int,
         alerted_utc: str,
     ) -> None:
+        canonical_node_id = self._canonical_node_id(node_id)
         with self._lock:
             self._conn.execute(
                 """
@@ -494,7 +580,7 @@ class PacketCounterDB:
                 SET alerted_utc = ?
                 WHERE node_id = ? AND packet_type = ? AND hour_bucket = ?
                 """,
-                (alerted_utc, node_id, packet_type, hour_bucket),
+                (alerted_utc, canonical_node_id, packet_type, hour_bucket),
             )
             self._conn.execute(
                 """
@@ -502,7 +588,14 @@ class PacketCounterDB:
                     (node_id, packet_type, hour_bucket, count_at_alert, alert_utc, message)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (node_id, packet_type, hour_bucket, count_at_alert, alerted_utc, message),
+                (
+                    canonical_node_id,
+                    packet_type,
+                    hour_bucket,
+                    count_at_alert,
+                    alerted_utc,
+                    message,
+                ),
             )
             self._conn.commit()
 
@@ -513,13 +606,14 @@ class PacketCounterDB:
         packet_type: str,
         hour_bucket: str,
     ) -> bool:
+        canonical_node_id = self._canonical_node_id(node_id)
         row = self._conn.execute(
             """
             SELECT alerted_utc
             FROM packet_hourly_counts
             WHERE node_id = ? AND packet_type = ? AND hour_bucket = ?
             """,
-            (node_id, packet_type, hour_bucket),
+            (canonical_node_id, packet_type, hour_bucket),
         ).fetchone()
         return bool(row and row[0])
 
@@ -530,6 +624,7 @@ class PacketCounterDB:
         packet_type: str,
         since_utc: str,
     ) -> int:
+        canonical_node_id = self._canonical_node_id(node_id)
         with self._lock:
             row = self._conn.execute(
                 """
@@ -537,7 +632,7 @@ class PacketCounterDB:
                 FROM packet_hourly_counts
                 WHERE node_id = ? AND packet_type = ? AND last_seen_utc >= ?
                 """,
-                (node_id, packet_type, since_utc),
+                (canonical_node_id, packet_type, since_utc),
             ).fetchone()
             return int(row[0]) if row else 0
 
@@ -548,6 +643,7 @@ class PacketCounterDB:
         packet_type: str,
         since_utc: str,
     ) -> bool:
+        canonical_node_id = self._canonical_node_id(node_id)
         with self._lock:
             row = self._conn.execute(
                 """
@@ -557,7 +653,7 @@ class PacketCounterDB:
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                (node_id, packet_type, since_utc),
+                (canonical_node_id, packet_type, since_utc),
             ).fetchone()
             return bool(row)
 
@@ -574,7 +670,11 @@ class PacketCounterDB:
         limit = max(1, min(max_rows, 500))
         node_filter = ""
         args_prefix: tuple[Any, ...] = (since_utc,)
-        exclude_ids = [str(v).strip() for v in (exclude_node_ids or []) if str(v).strip()]
+        exclude_ids = [
+            self._canonical_node_id(v)
+            for v in (exclude_node_ids or [])
+            if str(v).strip()
+        ]
         if exclude_ids:
             placeholders = ",".join(["?"] * len(exclude_ids))
             node_filter = f" AND node_id NOT IN ({placeholders})"
@@ -1153,12 +1253,19 @@ class WebDashboard:
         Last Update: <span id="updated" class="mono">-</span>
       </div>
     </div>
-    <div class="grid">
-      <section class="panel panel-top-nodes">
-        <h2>Top Nodes (__WINDOW_LABEL__)</h2>
-        <table id="topNodes">
-          <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
-          <tbody></tbody>
+	    <div class="grid">
+	      <section class="panel" style="grid-column: 1 / -1;">
+	        <h2>Recent Alerts</h2>
+	        <table id="alerts">
+	          <thead><tr><th>Alert Time</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
+	          <tbody></tbody>
+	        </table>
+	      </section>
+	      <section class="panel panel-top-nodes">
+	        <h2>Top Nodes (__WINDOW_LABEL__)</h2>
+	        <table id="topNodes">
+	          <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
+	          <tbody></tbody>
         </table>
       </section>
       <section class="panel">
@@ -1175,16 +1282,9 @@ class WebDashboard:
           <tbody></tbody>
         </table>
       </section>
-      <section class="panel" style="grid-column: 1 / -1;">
-        <h2>Recent Alerts</h2>
-        <table id="alerts">
-          <thead><tr><th>Alert Time</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </section>
-      <section class="panel" style="grid-column: 1 / -1;">
-        <h2>Configured Thresholds</h2>
-        <table id="thresholds">
+	      <section class="panel" style="grid-column: 1 / -1;">
+	        <h2>Configured Thresholds</h2>
+	        <table id="thresholds">
           <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
           <tbody></tbody>
         </table>
