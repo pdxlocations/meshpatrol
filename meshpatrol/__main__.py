@@ -1245,7 +1245,10 @@ class WebDashboard:
 <body class="scanline">
   <div class="wrap">
     <div class="head">
-      <h1>MeshPatrol Realtime Packet Usage</h1>
+	      <h1>
+	        MeshPatrol Realtime Packet Usage
+	        (<span id="connectedShortHeader">-</span> / <span id="connectedLongHeader">-</span>)
+	      </h1>
       <div class="stamp">
         Connected Node: <span id="connectedId" class="mono">-</span>
         (<span id="connectedShort">-</span> / <span id="connectedLong">-</span>)<br>
@@ -1254,41 +1257,51 @@ class WebDashboard:
       </div>
     </div>
 	    <div class="grid">
-	      <section class="panel" style="grid-column: 1 / -1;">
-	        <h2>Recent Alerts</h2>
-	        <table id="alerts">
-	          <thead><tr><th>Alert Time</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
-	          <tbody></tbody>
-	        </table>
+		      <section class="panel" style="grid-column: 1 / -1;">
+		        <h2>Recent Alerts</h2>
+		        <div class="table-wrap">
+		          <table id="alerts">
+		            <thead><tr><th>Alert Time</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
+		            <tbody></tbody>
+		          </table>
+		        </div>
+		      </section>
+		      <section class="panel panel-top-nodes">
+		        <h2>Top Nodes (__WINDOW_LABEL__)</h2>
+		        <div class="table-wrap">
+		          <table id="topNodes">
+		            <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
+		            <tbody></tbody>
+	          </table>
+	        </div>
 	      </section>
-	      <section class="panel panel-top-nodes">
-	        <h2>Top Nodes (__WINDOW_LABEL__)</h2>
-	        <table id="topNodes">
-	          <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
-	          <tbody></tbody>
-        </table>
-      </section>
-      <section class="panel">
-        <h2>Packet Types (__WINDOW_LABEL__)</h2>
-        <table id="byType">
-          <thead><tr><th>Type</th><th>Total</th><th>Nodes</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </section>
-      <section class="panel" style="grid-column: 1 / -1;">
-        <h2>Node + Type Breakdown</h2>
-        <table id="nodeType">
-          <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </section>
+	      <section class="panel">
+	        <h2>Packet Types (__WINDOW_LABEL__)</h2>
+	        <div class="table-wrap">
+	          <table id="byType">
+	            <thead><tr><th>Type</th><th>Total</th><th>Nodes</th></tr></thead>
+	            <tbody></tbody>
+	          </table>
+	        </div>
+	      </section>
 	      <section class="panel" style="grid-column: 1 / -1;">
-	        <h2>Configured Thresholds</h2>
-	        <table id="thresholds">
-          <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </section>
+	        <h2>Node + Type Breakdown</h2>
+	        <div class="table-wrap">
+	          <table id="nodeType">
+	            <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
+	            <tbody></tbody>
+	          </table>
+	        </div>
+	      </section>
+		      <section class="panel" style="grid-column: 1 / -1;">
+		        <h2>Configured Thresholds</h2>
+		        <div class="table-wrap">
+		          <table id="thresholds">
+	            <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
+	            <tbody></tbody>
+	          </table>
+	        </div>
+	      </section>
     </div>
   </div>
   <script>
@@ -1325,10 +1338,12 @@ class WebDashboard:
       };
       const start = data.window_start_local || '-';
       const end = data.window_end_local || data.generated_local || '-';
-      document.getElementById('connectedId').textContent = data.connected_node_id || '-';
-      document.getElementById('connectedShort').textContent = data.connected_short_name || '-';
-      document.getElementById('connectedLong').textContent = data.connected_long_name || '-';
-      document.getElementById('window').textContent = start + ' -> ' + end;
+	      document.getElementById('connectedId').textContent = data.connected_node_id || '-';
+	      document.getElementById('connectedShort').textContent = data.connected_short_name || '-';
+	      document.getElementById('connectedLong').textContent = data.connected_long_name || '-';
+	      document.getElementById('connectedShortHeader').textContent = data.connected_short_name || '-';
+	      document.getElementById('connectedLongHeader').textContent = data.connected_long_name || '-';
+	      document.getElementById('window').textContent = start + ' -> ' + end;
       document.getElementById('updated').textContent = data.generated_local || '-';
 
       fillTable('topNodes', data.top_nodes, ['node_id', 'short_name', 'long_name', 'total_count', 'last_seen_local']);
