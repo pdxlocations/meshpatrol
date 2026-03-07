@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-APP_WORK_DIR = Path.cwd() / "meshpatrol"
+APP_WORK_DIR = Path.cwd() / "meshpatrol-data"
 APP_DB_DIR = APP_WORK_DIR / "databases"
 
 APP_SETTINGS: dict[str, Any] = {
@@ -64,6 +64,41 @@ APP_SETTINGS: dict[str, Any] = {
 }
 
 VALID_THRESHOLD_UNITS = {"hour", "24h"}
+FALLBACK_PORTNUMS: tuple[str, ...] = (
+    "UNKNOWN_APP",
+    "TEXT_MESSAGE_APP",
+    "REMOTE_HARDWARE_APP",
+    "POSITION_APP",
+    "NODEINFO_APP",
+    "ROUTING_APP",
+    "ADMIN_APP",
+    "TEXT_MESSAGE_COMPRESSED_APP",
+    "WAYPOINT_APP",
+    "AUDIO_APP",
+    "DETECTION_SENSOR_APP",
+    "ALERT_APP",
+    "KEY_VERIFICATION_APP",
+    "REPLY_APP",
+    "IP_TUNNEL_APP",
+    "PAXCOUNTER_APP",
+    "STORE_FORWARD_PLUSPLUS_APP",
+    "NODE_STATUS_APP",
+    "SERIAL_APP",
+    "STORE_FORWARD_APP",
+    "RANGE_TEST_APP",
+    "TELEMETRY_APP",
+    "ZPS_APP",
+    "SIMULATOR_APP",
+    "TRACEROUTE_APP",
+    "NEIGHBORINFO_APP",
+    "ATAK_PLUGIN",
+    "MAP_REPORT_APP",
+    "POWERSTRESS_APP",
+    "RETICULUM_TUNNEL_APP",
+    "CAYENNE_APP",
+    "PRIVATE_APP",
+    "ATAK_FORWARDER",
+)
 
 
 def parse_tcp_target(value: str) -> tuple[str, int]:
@@ -319,6 +354,49 @@ def load_threshold_settings(
         default_unit=threshold_unit,
     )
     return default_threshold, thresholds, threshold_unit, threshold_units
+
+
+def _all_portnums() -> list[str]:
+    try:
+        from meshtastic.protobuf import portnums_pb2  # type: ignore
+    except Exception:
+        return list(FALLBACK_PORTNUMS)
+
+    return [v.name for v in portnums_pb2._PORTNUM.values if v.name != "MAX"]
+
+
+def _load_thresholds_example_template() -> dict[str, Any] | None:
+    dev_path = Path.cwd() / "config" / "thresholds-example.json"
+    if dev_path.exists():
+        try:
+            payload = json.loads(dev_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+        except (OSError, json.JSONDecodeError):
+            pass
+    return None
+
+
+def ensure_thresholds_file(path: Path, *, default_threshold: int, default_unit: str) -> None:
+    if path.exists():
+        return
+    template = _load_thresholds_example_template()
+    if template is None:
+        unit = normalize_threshold_unit(default_unit)
+        threshold_value = int(default_threshold)
+        if threshold_value <= 0:
+            threshold_value = 120
+        template = {
+            "threshold_unit": unit,
+            "default_threshold": threshold_value,
+            "overrides": {name: threshold_value for name in _all_portnums()},
+        }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(template, indent=2, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+    logging.info("Created default thresholds file at %s", path)
 
 
 class PacketCounterDB:
@@ -1227,7 +1305,11 @@ def run(argv: list[str] | None = None) -> int:
     )
 
     thresholds_path = Path(str(app.get("thresholds_path", str(APP_WORK_DIR / "thresholds.json"))))
-    thresholds_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_thresholds_file(
+        thresholds_path,
+        default_threshold=int(app["default_threshold"]),
+        default_unit=str(app.get("threshold_unit", "hour")),
+    )
 
     try:
         default_threshold, thresholds, threshold_unit, threshold_units = load_threshold_settings(

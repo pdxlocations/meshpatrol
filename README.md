@@ -85,9 +85,9 @@ APP_SETTINGS = {
     "port": None,
     "tcp_hostname": "127.0.0.1",
     "tcp_port": 4403,
-    "meshdb_path": "./meshpatrol/databases/mesh_packets.db",
-    "counter_db_path": "./meshpatrol/databases/packet_counters.db",
-    "thresholds_path": "./meshpatrol/thresholds.json",
+    "meshdb_path": "./meshpatrol-data/databases/mesh_packets.db",
+    "counter_db_path": "./meshpatrol-data/databases/packet_counters.db",
+    "thresholds_path": "./meshpatrol-data/thresholds.json",
     "threshold_unit": "hour",
     "default_threshold": 120,
     "threshold_overrides": [],
@@ -153,11 +153,11 @@ Dashboard includes:
 
 ## Data files
 
-By default, MeshPatrol creates/updates files in the working-directory `./meshpatrol/` folder:
+By default, MeshPatrol creates/updates files in the working-directory `./meshpatrol-data/` folder:
 
-- `./meshpatrol/databases/mesh_packets.<owner_node_num>.db` (created by `meshdb`)
-- `./meshpatrol/databases/packet_counters.db`
-- `./meshpatrol/thresholds.json`
+- `./meshpatrol-data/databases/mesh_packets.<owner_node_num>.db` (created by `meshdb`)
+- `./meshpatrol-data/databases/packet_counters.db`
+- `./meshpatrol-data/thresholds.json`
 
 If WAL mode is active, you may also see `-wal` and `-shm` sidecar files.
 
