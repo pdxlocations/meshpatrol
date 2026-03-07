@@ -917,8 +917,7 @@ class WebDashboard:
         self._threshold_units = threshold_units
         self._host = host
         self._port = port
-        any_24h = any(unit == "24h" for unit in threshold_units.values())
-        self._window_hours = 24 if any_24h else 1
+        self._window_hours = 24
         self._connected_node_id = ""
         self._connected_node_exclude_ids: list[str] = []
         self._thread: threading.Thread | None = None
@@ -1131,14 +1130,7 @@ class WebDashboard:
             raise RuntimeError("Flask is required when APP_SETTINGS['web_ui'] is True.") from exc
 
         app = Flask(__name__)
-        has_hour = any(unit == "hour" for unit in self._threshold_units.values())
-        has_24h = any(unit == "24h" for unit in self._threshold_units.values())
-        mixed_units = has_hour and has_24h
-        window_label = (
-            "Mixed Units (Up to 24 Hours)"
-            if mixed_units
-            else ("Past 24 Hours" if self._window_hours == 24 else "This Hour")
-        )
+        window_label = "Past 24 Hours"
 
         @app.get("/")
         def dashboard() -> str:
@@ -1177,7 +1169,7 @@ class WebDashboard:
         </table>
       </section>
       <section class="panel" style="grid-column: 1 / -1;">
-        <h2>Node + Type Breakdown (__WINDOW_LABEL__)</h2>
+        <h2>Node + Type Breakdown</h2>
         <table id="nodeType">
           <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
           <tbody></tbody>
