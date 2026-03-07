@@ -366,14 +366,21 @@ def _all_portnums() -> list[str]:
 
 
 def _load_thresholds_example_template() -> dict[str, Any] | None:
-    dev_path = Path.cwd() / "config" / "thresholds-example.json"
-    if dev_path.exists():
+    candidate_paths = (
+        Path.cwd() / "meshpatrol" / "thresholds-example.json",
+        Path(__file__).resolve().with_name("thresholds-example.json"),
+        Path.cwd() / "config" / "thresholds-example.json",
+        Path.cwd() / "thresholds-example.json",
+    )
+    for candidate in candidate_paths:
+        if not candidate.exists():
+            continue
         try:
-            payload = json.loads(dev_path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
-                return payload
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            pass
+            continue
+        if isinstance(payload, dict):
+            return payload
     return None
 
 
