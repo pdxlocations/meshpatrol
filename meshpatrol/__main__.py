@@ -806,6 +806,18 @@ class MeshDBAdapter:
 
         handle_packet(packet)
 
+    def sync_interface_nodes(self, owner_node_num: int, interface: Any) -> None:
+        node_db_cls = getattr(self._meshdb, "NodeDB", None)
+        if node_db_cls is None:
+            return
+
+        nodes_by_num = getattr(interface, "nodesByNum", None)
+        if not isinstance(nodes_by_num, dict) or not nodes_by_num:
+            return
+
+        node_db = node_db_cls(owner_node_num, str(self._meshdb_path))
+        node_db.init_from_interface_nodes(list(nodes_by_num.values()))
+
 
 @dataclass(slots=True)
 class Config:
@@ -837,6 +849,15 @@ class PacketMonitorBot:
 
     def threshold_unit_for(self, packet_type: str) -> str:
         return self.cfg.threshold_units.get(packet_type, self.cfg.threshold_units["*"])
+
+    def sync_interface_nodes(self, interface: Any) -> None:
+        owner_node_num = self._local_node_num(interface)
+        if owner_node_num is None:
+            return
+        try:
+            self.mesh_store.sync_interface_nodes(owner_node_num, interface)
+        except Exception:
+            logging.exception("Failed to sync interface nodes into meshdb")
 
     def on_receive(self, packet: dict[str, Any], interface: Any) -> None:
         now = datetime.now(UTC)
@@ -1084,6 +1105,28 @@ class WebDashboard:
 
         placeholders = ",".join(["?"] * len(canonical_ids))
         names_by_node: dict[str, dict[str, str]] = {}
+        owner_node_num = int_from_node_id(self._connected_node_id)
+
+        if owner_node_num is not None:
+            try:
+                import meshdb  # type: ignore
+
+                node_db = meshdb.NodeDB(owner_node_num, str(self._meshdb_path))
+                with node_db.connect() as conn:
+                    conn.row_factory = sqlite3.Row
+                    sql = (
+                        f"SELECT node_num, long_name, short_name FROM {node_db.table} "
+                        f"WHERE node_num IN ({placeholders})"
+                    )
+                    for row in conn.execute(sql, canonical_ids).fetchall():
+                        node_key = self._canonical_node_id(row["node_num"])
+                        names_by_node[node_key] = {
+                            "long_name": str(row["long_name"] or "").strip(),
+                            "short_name": str(row["short_name"] or "").strip(),
+                        }
+                return names_by_node
+            except Exception:
+                logging.exception("Failed to load names from connected meshdb node table")
 
         for db_path in self._meshdb_candidate_paths():
             try:
@@ -1594,6 +1637,11 @@ def run(argv: list[str] | None = None) -> int:
             return
         bot.on_receive(packet, interface)
 
+    def _on_node_updated(node: Any, interface: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        bot.sync_interface_nodes(interface)
+
     try:
         if cfg.web_ui:
             try:
@@ -1629,11 +1677,14 @@ def run(argv: list[str] | None = None) -> int:
             else:
                 logging.info("Connected via Meshtastic auto-detected serial interface")
 
+        bot.sync_interface_nodes(iface)
+
         if web_dashboard:
             local_node_num = PacketMonitorBot._local_node_num(iface)
             if local_node_num is not None:
                 web_dashboard.set_connected_node_id(local_node_num)
         pub.subscribe(_on_receive, "meshtastic.receive")
+        pub.subscribe(_on_node_updated, "meshtastic.node.updated")
         logging.info("Packet monitor started. Listening for meshtastic.receive")
 
         while True:
