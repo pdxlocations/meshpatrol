@@ -99,13 +99,13 @@ h1 {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 14px;
   margin-top: 16px;
 }
 
 .panel {
-  grid-column: span 6;
+  grid-column: 1 / -1;
   min-width: 0;
   padding: 14px;
   border: 1px solid var(--line);
@@ -121,7 +121,7 @@ h1 {
 }
 
 .panel-top-nodes {
-  grid-column: span 8;
+  grid-column: 1 / -1;
 }
 
 .panel h2 {

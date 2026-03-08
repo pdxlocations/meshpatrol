@@ -680,6 +680,13 @@ class PacketCounterDB:
             node_filter = f" AND node_id NOT IN ({placeholders})"
             args_prefix = (since_utc, *exclude_ids)
         with self._lock:
+            total_packets_row = self._conn.execute(
+                """
+                SELECT COALESCE(SUM(count), 0) AS total_packets
+                FROM packet_hourly_counts
+                WHERE last_seen_utc >= ?""" + node_filter,
+                args_prefix,
+            ).fetchone()
             top_nodes = [
                 dict(row)
                 for row in self._conn.execute(
@@ -760,6 +767,7 @@ class PacketCounterDB:
         return {
             "window_start_utc": since_utc,
             "generated_utc": datetime.now(UTC).isoformat(),
+            "total_packets": int(total_packets_row["total_packets"]) if total_packets_row else 0,
             "top_nodes": top_nodes,
             "by_type": by_type,
             "node_type_rows": node_type_rows,
@@ -1292,13 +1300,14 @@ class WebDashboard:
 	        <p class="eyebrow">Network Watch</p>
 	        <h1>MeshPatrol Realtime Packet Usage</h1>
 	      </div>
-	      <div class="stamp">
-	        <div><span class="stamp-label">Node</span> <span id="connectedId" class="mono">-</span></div>
-	        <div><span class="stamp-label">Short</span> <span id="connectedShort">-</span></div>
-	        <div><span class="stamp-label">Long</span> <span id="connectedLong">-</span></div>
-	        <div><span class="stamp-label">Window</span> <span id="window" class="mono">-</span></div>
-	        <div><span class="stamp-label">Updated</span> <span id="updated" class="mono">-</span></div>
-	      </div>
+		      <div class="stamp">
+		        <div><span class="stamp-label">Node</span> <span id="connectedId" class="mono">-</span></div>
+		        <div><span class="stamp-label">Short</span> <span id="connectedShort">-</span></div>
+		        <div><span class="stamp-label">Long</span> <span id="connectedLong">-</span></div>
+		        <div><span class="stamp-label">Total Packets (24 hrs)</span> <span id="totalPackets" class="mono">-</span></div>
+		        <div><span class="stamp-label">Window</span> <span id="window" class="mono">-</span></div>
+		        <div><span class="stamp-label">Updated</span> <span id="updated" class="mono">-</span></div>
+		      </div>
 	    </div>
 	    <div class="grid">
 		      <section class="panel panel-wide">
@@ -1482,12 +1491,13 @@ class WebDashboard:
 	        return u || '';
       };
       const start = data.window_start_local || '-';
-      const end = data.window_end_local || data.generated_local || '-';
-	      document.getElementById('connectedId').textContent = data.connected_node_id || '-';
-	      document.getElementById('connectedShort').textContent = data.connected_short_name || '-';
-	      document.getElementById('connectedLong').textContent = data.connected_long_name || '-';
-	      document.getElementById('window').textContent = start + ' -> ' + end;
-      document.getElementById('updated').textContent = data.generated_local || '-';
+	      const end = data.window_end_local || data.generated_local || '-';
+		      document.getElementById('connectedId').textContent = data.connected_node_id || '-';
+		      document.getElementById('connectedShort').textContent = data.connected_short_name || '-';
+		      document.getElementById('connectedLong').textContent = data.connected_long_name || '-';
+		      document.getElementById('totalPackets').textContent = String(data.total_packets ?? '-');
+		      document.getElementById('window').textContent = start + ' -> ' + end;
+	      document.getElementById('updated').textContent = data.generated_local || '-';
 
 		      fillTable('topNodes', data.top_nodes, ['node_id', 'short_name', 'long_name', 'total_count', 'last_seen_local']);
 	      fillTable('byType', data.by_type, ['packet_type', 'total_count', 'distinct_nodes']);
