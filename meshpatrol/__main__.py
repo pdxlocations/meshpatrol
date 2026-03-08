@@ -53,9 +53,8 @@ APP_SETTINGS: dict[str, Any] = {
     "threshold_overrides": [],
     "alert_template": (
         "MeshPatrol alert: node {node_id} sent {count} packets of type "
-        "{packet_type} in {window_label} ending {hour_bucket} "
-        "(threshold {threshold} per {threshold_unit}). "
-        "Please check your {packet_type} settings."
+        "{packet_type} in {window_label}. "
+        "Please check your settings."
     ),
     "log_level": "INFO",
     "web_ui": True,
@@ -1228,12 +1227,15 @@ class WebDashboard:
                 row["short_name"] = str(names.get("short_name") or "")
                 row["long_name"] = str(names.get("long_name") or "")
 
+        filtered_node_type_rows: list[dict[str, Any]] = []
         for row in data["node_type_rows"]:
             packet_type = str(row.get("packet_type") or "UNKNOWN")
             threshold_unit = self._threshold_unit_for(packet_type)
             count_24h = int(row.get("count") or 0)
             count_1h = int(row.get("count_1h") or 0)
             count = count_24h if threshold_unit == "24h" else count_1h
+            if threshold_unit == "hour" and count <= 0:
+                continue
             threshold = self._threshold_for(packet_type)
             elapsed_seconds = elapsed_seconds_24h if threshold_unit == "24h" else elapsed_seconds_1h
             row["threshold"] = threshold
@@ -1244,6 +1246,8 @@ class WebDashboard:
                 threshold=threshold,
                 elapsed_seconds=elapsed_seconds,
             )
+            filtered_node_type_rows.append(row)
+        data["node_type_rows"] = filtered_node_type_rows
 
         threshold_rows = [
             {
@@ -1324,13 +1328,13 @@ class WebDashboard:
 		        <h2>Node + Type Breakdown</h2>
 		        <div class="table-wrap">
 		          <table id="nodeType">
-		            <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
+		            <thead><tr><th>Long Name</th><th>Short Name</th><th>Node Number</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
 		            <tbody></tbody>
 		          </table>
 		        </div>
 		        <div id="nodeTypeMobile" class="mobile-list"></div>
 		      </section>
-		      <section class="panel panel-top-nodes">
+		      <section class="panel panel-wide">
 		        <h2>Top Nodes (__WINDOW_LABEL__)</h2>
 		        <div class="table-wrap">
 		          <table id="topNodes">
@@ -1340,7 +1344,7 @@ class WebDashboard:
 		        </div>
 		        <div id="topNodesMobile" class="mobile-list"></div>
 	      </section>
-	      <section class="panel">
+	      <section class="panel panel-wide">
 	        <h2>Packet Types (__WINDOW_LABEL__)</h2>
 	        <div class="table-wrap">
 	          <table id="byType">
@@ -1428,18 +1432,12 @@ class WebDashboard:
 		        card.className = 'mobile-card';
 		        const title = document.createElement('div');
 		        title.className = 'mobile-card-title';
-	        title.textContent = textOrDash(row.short_name) !== '-' ? textOrDash(row.short_name) : textOrDash(row.node_id);
-	        card.appendChild(title);
-		        const sub = document.createElement('div');
-		        sub.className = 'mobile-card-subtitle';
-		        sub.textContent = textOrDash(row.packet_type);
-		        card.appendChild(sub);
-		        addMobileField(card, 'Node', row.node_id, 'mono');
+		        title.textContent = textOrDash(row.long_name) !== '-' ? textOrDash(row.long_name) : (textOrDash(row.short_name) !== '-' ? textOrDash(row.short_name) : textOrDash(row.node_id));
+		        card.appendChild(title);
 		        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
-		        if (textOrDash(row.long_name) !== '-') addMobileField(card, 'Long Name', row.long_name);
-		        addMobileField(card, 'Count', row.count);
-		        addMobileField(card, 'Threshold', row.threshold);
-		        addMobileField(card, 'Unit', row.threshold_unit);
+		        addMobileField(card, 'Node Number', row.node_id, 'mono');
+		        addMobileField(card, 'Type', row.packet_type);
+		        addMobileField(card, 'Status', `${textOrDash(row.count)} of ${textOrDash(row.threshold)} ${textOrDash(row.threshold_unit)}`);
 		        if (textOrDash(row.eta_to_threshold) !== '-') addMobileField(card, 'ETA To Threshold', row.eta_to_threshold);
 		        if (textOrDash(row.alerted_local) !== '-') addMobileField(card, 'Alerted', row.alerted_local);
 		        if (textOrDash(row.last_seen_local) !== '-') addMobileField(card, 'Last Seen', row.last_seen_local);
@@ -1465,23 +1463,17 @@ class WebDashboard:
 		        addMobileField(card, 'Count', row.count_at_alert);
 		        return card;
 		      };
-	      const buildTopNodeCard = (row) => {
-		        const card = document.createElement('article');
-		        card.className = 'mobile-card';
-		        const title = document.createElement('div');
-		        title.className = 'mobile-card-title';
-		        title.textContent = textOrDash(row.short_name) !== '-' ? textOrDash(row.short_name) : textOrDash(row.node_id);
-	        card.appendChild(title);
-		        if (textOrDash(row.long_name) !== '-') {
-		          const sub = document.createElement('div');
-		          sub.className = 'mobile-card-subtitle';
-		          sub.textContent = row.long_name;
-		          card.appendChild(sub);
-		        }
-		        addMobileField(card, 'Node', row.node_id, 'mono');
-		        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
-		        if (textOrDash(row.long_name) !== '-') addMobileField(card, 'Long Name', row.long_name);
-		        addMobileField(card, 'Total Packets', row.total_count);
+		      const buildTopNodeCard = (row) => {
+			        const card = document.createElement('article');
+			        card.className = 'mobile-card';
+			        const title = document.createElement('div');
+			        title.className = 'mobile-card-title';
+			        title.textContent = textOrDash(row.long_name) !== '-' ? textOrDash(row.long_name) : (textOrDash(row.short_name) !== '-' ? textOrDash(row.short_name) : textOrDash(row.node_id));
+			        card.appendChild(title);
+			        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
+			        addMobileField(card, 'Node Number', row.node_id, 'mono');
+			        addMobileField(card, 'Node ID', formatHexNodeId(row.node_id), 'mono');
+			        addMobileField(card, 'Total Packets', row.total_count);
 		        if (textOrDash(row.last_seen_local) !== '-') addMobileField(card, 'Last Seen', row.last_seen_local);
 		        return card;
 		      };
@@ -1489,8 +1481,17 @@ class WebDashboard:
 	        if (u === '24h') return 'per 24h';
 	        if (u === 'hour') return 'per hour';
 	        return u || '';
-      };
-      const start = data.window_start_local || '-';
+	      };
+	      const formatHexNodeId = (value) => {
+	        const text = textOrDash(value);
+	        if (text === '-') return '-';
+	        try {
+	          return '!' + BigInt(text).toString(16).padStart(8, '0');
+	        } catch {
+	          return text;
+	        }
+	      };
+	      const start = data.window_start_local || '-';
 	      const end = data.window_end_local || data.generated_local || '-';
 		      document.getElementById('connectedId').textContent = data.connected_node_id || '-';
 		      document.getElementById('connectedShort').textContent = data.connected_short_name || '-';
@@ -1510,7 +1511,7 @@ class WebDashboard:
 	        threshold_unit: formatUnit(row.threshold_unit),
 	      }));
 	      fillTable('thresholds', thresholds, ['packet_type', 'threshold', 'unit']);
-		      fillTable('nodeType', nodeTypeRows, ['node_id', 'short_name', 'long_name', 'packet_type', 'count', 'threshold', 'threshold_unit', 'eta_to_threshold', 'alerted_local', 'last_seen_local']);
+	      fillTable('nodeType', nodeTypeRows, ['long_name', 'short_name', 'node_id', 'packet_type', 'count', 'threshold', 'threshold_unit', 'eta_to_threshold', 'alerted_local', 'last_seen_local']);
 	      fillTable('alerts', data.alerts, ['alert_local', 'node_id', 'short_name', 'long_name', 'packet_type', 'count_at_alert', 'message']);
 	      renderMobileList('nodeTypeMobile', nodeTypeRows, buildNodeTypeCard);
 	      renderMobileList('alertsMobile', data.alerts, buildAlertCard);
