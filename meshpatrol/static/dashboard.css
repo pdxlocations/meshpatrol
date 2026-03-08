@@ -132,6 +132,46 @@ h1 {
   text-transform: uppercase;
 }
 
+.pane-toggle {
+  display: block;
+}
+
+.pane-toggle summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pane-toggle summary::-webkit-details-marker {
+  display: none;
+}
+
+.pane-toggle summary::after {
+  content: "▾";
+  color: var(--accent-strong);
+  font-size: 15px;
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform 140ms ease;
+}
+
+.pane-toggle[open] summary::after {
+  transform: rotate(0deg);
+}
+
+.pane-body {
+  margin-top: 12px;
+}
+
 .table-wrap {
   width: 100%;
 }

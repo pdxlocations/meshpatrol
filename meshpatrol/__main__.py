@@ -1314,54 +1314,74 @@ class WebDashboard:
 		      </div>
 	    </div>
 	    <div class="grid">
-		      <section class="panel panel-wide">
-		        <h2>Recent Alerts</h2>
-		        <div class="table-wrap">
-		          <table id="alerts">
-		            <thead><tr><th>Alert Time</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
-		            <tbody></tbody>
-		          </table>
-		        </div>
-		        <div id="alertsMobile" class="mobile-list"></div>
+			      <section class="panel panel-wide">
+			        <details class="pane-toggle" open>
+			          <summary>Recent Alerts</summary>
+			          <div class="pane-body">
+			            <div class="table-wrap">
+			              <table id="alerts">
+			                <thead><tr><th>Alert Time</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
+			                <tbody></tbody>
+			              </table>
+			            </div>
+			            <div id="alertsMobile" class="mobile-list"></div>
+			          </div>
+			        </details>
+			      </section>
+			      <section class="panel panel-wide">
+			        <details class="pane-toggle" open>
+			          <summary>Node + Type Breakdown</summary>
+			          <div class="pane-body">
+			            <div class="table-wrap">
+			              <table id="nodeType">
+			                <thead><tr><th>Long Name</th><th>Short Name</th><th>Node Number</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
+			                <tbody></tbody>
+			              </table>
+			            </div>
+			            <div id="nodeTypeMobile" class="mobile-list"></div>
+			          </div>
+			        </details>
+			      </section>
+			      <section class="panel panel-wide">
+			        <details class="pane-toggle" open>
+			          <summary>Top Nodes (__WINDOW_LABEL__)</summary>
+			          <div class="pane-body">
+			            <div class="table-wrap">
+			              <table id="topNodes">
+			                <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
+			                <tbody></tbody>
+			              </table>
+			            </div>
+			            <div id="topNodesMobile" class="mobile-list"></div>
+			          </div>
+			        </details>
 		      </section>
-		      <section class="panel panel-wide">
-		        <h2>Node + Type Breakdown</h2>
-		        <div class="table-wrap">
-		          <table id="nodeType">
-		            <thead><tr><th>Long Name</th><th>Short Name</th><th>Node Number</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
-		            <tbody></tbody>
-		          </table>
-		        </div>
-		        <div id="nodeTypeMobile" class="mobile-list"></div>
-		      </section>
-		      <section class="panel panel-wide">
-		        <h2>Top Nodes (__WINDOW_LABEL__)</h2>
-		        <div class="table-wrap">
-		          <table id="topNodes">
-		            <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
-		            <tbody></tbody>
-		          </table>
-		        </div>
-		        <div id="topNodesMobile" class="mobile-list"></div>
-	      </section>
 	      <section class="panel panel-wide">
-	        <h2>Packet Types (__WINDOW_LABEL__)</h2>
-	        <div class="table-wrap">
-	          <table id="byType">
-	            <thead><tr><th>Type</th><th>Total</th><th>Nodes</th></tr></thead>
-	            <tbody></tbody>
-	          </table>
-	        </div>
+	        <details class="pane-toggle" open>
+	          <summary>Packet Types (__WINDOW_LABEL__)</summary>
+	          <div class="pane-body">
+	            <div class="table-wrap">
+	              <table id="byType">
+	                <thead><tr><th>Type</th><th>Total</th><th>Nodes</th></tr></thead>
+	                <tbody></tbody>
+	              </table>
+	            </div>
+	          </div>
+	        </details>
 	      </section>
-		      <section class="panel panel-wide">
-		        <h2>Configured Thresholds</h2>
-		        <div class="table-wrap">
-		          <table id="thresholds">
-		            <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
-		            <tbody></tbody>
-		          </table>
-		        </div>
-		      </section>
+			      <section class="panel panel-wide">
+			        <details class="pane-toggle">
+			          <summary>Configured Thresholds</summary>
+			          <div class="pane-body">
+			            <div class="table-wrap">
+			              <table id="thresholds">
+			                <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
+			                <tbody></tbody>
+			              </table>
+			            </div>
+			          </div>
+			        </details>
+			      </section>
 	    </div>
 	  </div>
 	  <script>
