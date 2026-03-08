@@ -1243,21 +1243,22 @@ class WebDashboard:
   <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body class="scanline">
-  <div class="wrap">
-    <div class="head">
-	      <h1>
-	        MeshPatrol Realtime Packet Usage
-	        (<span id="connectedShortHeader">-</span> / <span id="connectedLongHeader">-</span>)
-	      </h1>
-      <div class="stamp">
-        Connected Node: <span id="connectedId" class="mono">-</span>
-        (<span id="connectedShort">-</span> / <span id="connectedLong">-</span>)<br>
-        Window: <span id="window" class="mono">-</span><br>
-        Last Update: <span id="updated" class="mono">-</span>
-      </div>
-    </div>
+	  <div class="wrap">
+	    <div class="head">
+	      <div class="hero">
+	        <p class="eyebrow">Network Watch</p>
+	        <h1>MeshPatrol Realtime Packet Usage</h1>
+	      </div>
+	      <div class="stamp">
+	        <div><span class="stamp-label">Node</span> <span id="connectedId" class="mono">-</span></div>
+	        <div><span class="stamp-label">Short</span> <span id="connectedShort">-</span></div>
+	        <div><span class="stamp-label">Long</span> <span id="connectedLong">-</span></div>
+	        <div><span class="stamp-label">Window</span> <span id="window" class="mono">-</span></div>
+	        <div><span class="stamp-label">Updated</span> <span id="updated" class="mono">-</span></div>
+	      </div>
+	    </div>
 	    <div class="grid">
-		      <section class="panel" style="grid-column: 1 / -1;">
+		      <section class="panel panel-wide">
 		        <h2>Recent Alerts</h2>
 		        <div class="table-wrap">
 		          <table id="alerts">
@@ -1265,6 +1266,17 @@ class WebDashboard:
 		            <tbody></tbody>
 		          </table>
 		        </div>
+		        <div id="alertsMobile" class="mobile-list"></div>
+		      </section>
+		      <section class="panel panel-wide">
+		        <h2>Node + Type Breakdown</h2>
+		        <div class="table-wrap">
+		          <table id="nodeType">
+		            <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
+		            <tbody></tbody>
+		          </table>
+		        </div>
+		        <div id="nodeTypeMobile" class="mobile-list"></div>
 		      </section>
 		      <section class="panel panel-top-nodes">
 		        <h2>Top Nodes (__WINDOW_LABEL__)</h2>
@@ -1272,8 +1284,9 @@ class WebDashboard:
 		          <table id="topNodes">
 		            <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
 		            <tbody></tbody>
-	          </table>
-	        </div>
+		          </table>
+		        </div>
+		        <div id="topNodesMobile" class="mobile-list"></div>
 	      </section>
 	      <section class="panel">
 	        <h2>Packet Types (__WINDOW_LABEL__)</h2>
@@ -1284,33 +1297,26 @@ class WebDashboard:
 	          </table>
 	        </div>
 	      </section>
-	      <section class="panel" style="grid-column: 1 / -1;">
-	        <h2>Node + Type Breakdown</h2>
-	        <div class="table-wrap">
-	          <table id="nodeType">
-	            <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
-	            <tbody></tbody>
-	          </table>
-	        </div>
-	      </section>
-		      <section class="panel" style="grid-column: 1 / -1;">
+		      <section class="panel panel-wide">
 		        <h2>Configured Thresholds</h2>
 		        <div class="table-wrap">
 		          <table id="thresholds">
-	            <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
-	            <tbody></tbody>
-	          </table>
-	        </div>
-	      </section>
-    </div>
-  </div>
-  <script>
-    function fillTable(id, rows, cells) {
-      const body = document.querySelector('#' + id + ' tbody');
-      body.innerHTML = '';
-      if (!rows || rows.length === 0) {
-        const tr = document.createElement('tr');
-        const td = document.createElement('td');
+		            <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
+		            <tbody></tbody>
+		          </table>
+		        </div>
+		      </section>
+	    </div>
+	  </div>
+	  <script>
+	    function fillTable(id, rows, cells) {
+	      const table = document.getElementById(id);
+	      const body = table.querySelector('tbody');
+	      const labels = Array.from(table.querySelectorAll('thead th')).map((th) => th.textContent || '');
+	      body.innerHTML = '';
+	      if (!rows || rows.length === 0) {
+	        const tr = document.createElement('tr');
+	        const td = document.createElement('td');
         td.className = 'empty';
         td.colSpan = cells.length;
         td.textContent = 'No data yet';
@@ -1318,48 +1324,145 @@ class WebDashboard:
         body.appendChild(tr);
         return;
       }
-      rows.forEach((row) => {
-        const tr = document.createElement('tr');
-        cells.forEach((key) => {
-          const td = document.createElement('td');
-          const v = row[key];
-          td.textContent = v === null || v === undefined ? '' : String(v);
-          tr.appendChild(td);
-        });
-        body.appendChild(tr);
+	      rows.forEach((row) => {
+	        const tr = document.createElement('tr');
+	        cells.forEach((key, index) => {
+	          const td = document.createElement('td');
+	          const v = row[key];
+	          td.dataset.label = labels[index] || '';
+	          td.textContent = v === null || v === undefined ? '' : String(v);
+	          tr.appendChild(td);
+	        });
+	        body.appendChild(tr);
       });
     }
 
-    function render(data) {
-      const formatUnit = (u) => {
-        if (u === '24h') return 'per 24h';
-        if (u === 'hour') return 'per hour';
-        return u || '';
+	    function render(data) {
+	      const textOrDash = (value) => {
+	        if (value === null || value === undefined) return '-';
+	        const text = String(value).trim();
+	        return text || '-';
+	      };
+	      const renderMobileList = (id, rows, buildCard) => {
+	        const root = document.getElementById(id);
+	        root.innerHTML = '';
+	        if (!rows || rows.length === 0) {
+	          const empty = document.createElement('div');
+	          empty.className = 'mobile-empty';
+	          empty.textContent = 'No data yet';
+	          root.appendChild(empty);
+	          return;
+	        }
+	        rows.forEach((row) => root.appendChild(buildCard(row)));
+	      };
+	      const addMobileField = (card, label, value, extraClass) => {
+	        if (value === null || value === undefined) return;
+	        const text = String(value).trim();
+	        if (!text) return;
+	        const row = document.createElement('div');
+	        row.className = 'mobile-field' + (extraClass ? ' ' + extraClass : '');
+	        const key = document.createElement('span');
+	        key.className = 'mobile-field-label';
+	        key.textContent = label;
+	        const val = document.createElement('span');
+	        val.className = 'mobile-field-value';
+	        val.textContent = text;
+	        row.appendChild(key);
+	        row.appendChild(val);
+	        card.appendChild(row);
+	      };
+		      const buildNodeTypeCard = (row) => {
+		        const card = document.createElement('article');
+		        card.className = 'mobile-card';
+		        const title = document.createElement('div');
+		        title.className = 'mobile-card-title';
+	        title.textContent = textOrDash(row.short_name) !== '-' ? textOrDash(row.short_name) : textOrDash(row.node_id);
+	        card.appendChild(title);
+		        const sub = document.createElement('div');
+		        sub.className = 'mobile-card-subtitle';
+		        sub.textContent = textOrDash(row.packet_type);
+		        card.appendChild(sub);
+		        addMobileField(card, 'Node', row.node_id, 'mono');
+		        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
+		        if (textOrDash(row.long_name) !== '-') addMobileField(card, 'Long Name', row.long_name);
+		        addMobileField(card, 'Count', row.count);
+		        addMobileField(card, 'Threshold', row.threshold);
+		        addMobileField(card, 'Unit', row.threshold_unit);
+		        if (textOrDash(row.eta_to_threshold) !== '-') addMobileField(card, 'ETA To Threshold', row.eta_to_threshold);
+		        if (textOrDash(row.alerted_local) !== '-') addMobileField(card, 'Alerted', row.alerted_local);
+		        if (textOrDash(row.last_seen_local) !== '-') addMobileField(card, 'Last Seen', row.last_seen_local);
+		        return card;
+		      };
+	      const buildAlertCard = (row) => {
+	        const card = document.createElement('article');
+	        card.className = 'mobile-card';
+	        const title = document.createElement('div');
+	        title.className = 'mobile-card-title';
+	        title.textContent = textOrDash(row.packet_type);
+	        card.appendChild(title);
+		        if (textOrDash(row.message) !== '-') {
+		          const sub = document.createElement('div');
+		          sub.className = 'mobile-card-subtitle';
+		          sub.textContent = row.message;
+		          card.appendChild(sub);
+		        }
+		        addMobileField(card, 'Alert Time', row.alert_local);
+		        addMobileField(card, 'Node', row.node_id, 'mono');
+		        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
+		        if (textOrDash(row.long_name) !== '-') addMobileField(card, 'Long Name', row.long_name);
+		        addMobileField(card, 'Count', row.count_at_alert);
+		        return card;
+		      };
+	      const buildTopNodeCard = (row) => {
+		        const card = document.createElement('article');
+		        card.className = 'mobile-card';
+		        const title = document.createElement('div');
+		        title.className = 'mobile-card-title';
+		        title.textContent = textOrDash(row.short_name) !== '-' ? textOrDash(row.short_name) : textOrDash(row.node_id);
+	        card.appendChild(title);
+		        if (textOrDash(row.long_name) !== '-') {
+		          const sub = document.createElement('div');
+		          sub.className = 'mobile-card-subtitle';
+		          sub.textContent = row.long_name;
+		          card.appendChild(sub);
+		        }
+		        addMobileField(card, 'Node', row.node_id, 'mono');
+		        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
+		        if (textOrDash(row.long_name) !== '-') addMobileField(card, 'Long Name', row.long_name);
+		        addMobileField(card, 'Total Packets', row.total_count);
+		        if (textOrDash(row.last_seen_local) !== '-') addMobileField(card, 'Last Seen', row.last_seen_local);
+		        return card;
+		      };
+	      const formatUnit = (u) => {
+	        if (u === '24h') return 'per 24h';
+	        if (u === 'hour') return 'per hour';
+	        return u || '';
       };
       const start = data.window_start_local || '-';
       const end = data.window_end_local || data.generated_local || '-';
 	      document.getElementById('connectedId').textContent = data.connected_node_id || '-';
 	      document.getElementById('connectedShort').textContent = data.connected_short_name || '-';
 	      document.getElementById('connectedLong').textContent = data.connected_long_name || '-';
-	      document.getElementById('connectedShortHeader').textContent = data.connected_short_name || '-';
-	      document.getElementById('connectedLongHeader').textContent = data.connected_long_name || '-';
 	      document.getElementById('window').textContent = start + ' -> ' + end;
       document.getElementById('updated').textContent = data.generated_local || '-';
 
-      fillTable('topNodes', data.top_nodes, ['node_id', 'short_name', 'long_name', 'total_count', 'last_seen_local']);
-      fillTable('byType', data.by_type, ['packet_type', 'total_count', 'distinct_nodes']);
-      const thresholds = (data.thresholds || []).map((row) => ({
-        ...row,
-        unit: formatUnit(row.unit),
+		      fillTable('topNodes', data.top_nodes, ['node_id', 'short_name', 'long_name', 'total_count', 'last_seen_local']);
+	      fillTable('byType', data.by_type, ['packet_type', 'total_count', 'distinct_nodes']);
+	      const thresholds = (data.thresholds || []).map((row) => ({
+	        ...row,
+	        unit: formatUnit(row.unit),
       }));
-      const nodeTypeRows = (data.node_type_rows || []).map((row) => ({
-        ...row,
-        threshold_unit: formatUnit(row.threshold_unit),
-      }));
-      fillTable('thresholds', thresholds, ['packet_type', 'threshold', 'unit']);
-      fillTable('nodeType', nodeTypeRows, ['node_id', 'short_name', 'long_name', 'packet_type', 'count', 'threshold', 'threshold_unit', 'eta_to_threshold', 'alerted_local', 'last_seen_local']);
-      fillTable('alerts', data.alerts, ['alert_local', 'node_id', 'short_name', 'long_name', 'packet_type', 'count_at_alert', 'message']);
-    }
+	      const nodeTypeRows = (data.node_type_rows || []).map((row) => ({
+	        ...row,
+	        threshold_unit: formatUnit(row.threshold_unit),
+	      }));
+	      fillTable('thresholds', thresholds, ['packet_type', 'threshold', 'unit']);
+		      fillTable('nodeType', nodeTypeRows, ['node_id', 'short_name', 'long_name', 'packet_type', 'count', 'threshold', 'threshold_unit', 'eta_to_threshold', 'alerted_local', 'last_seen_local']);
+	      fillTable('alerts', data.alerts, ['alert_local', 'node_id', 'short_name', 'long_name', 'packet_type', 'count_at_alert', 'message']);
+	      renderMobileList('nodeTypeMobile', nodeTypeRows, buildNodeTypeCard);
+	      renderMobileList('alertsMobile', data.alerts, buildAlertCard);
+	      renderMobileList('topNodesMobile', data.top_nodes, buildTopNodeCard);
+	    }
 
     async function fetchOnce() {
       const res = await fetch('/api/snapshot', {cache: 'no-store'});
