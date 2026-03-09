@@ -1382,9 +1382,14 @@ class WebDashboard:
 			          </div>
 			        </details>
 			      </section>
-	    </div>
-	  </div>
-	  <script>
+		    </div>
+		    <footer class="foot">
+		      <a href="https://github.com/pdxlocations/meshpatrol" target="_blank" rel="noopener noreferrer">
+		        View Project on GitHub
+		      </a>
+		    </footer>
+		  </div>
+		  <script>
 	    function fillTable(id, rows, cells) {
 	      const table = document.getElementById(id);
 	      const body = table.querySelector('tbody');

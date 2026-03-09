@@ -104,6 +104,26 @@ h1 {
   margin-top: 16px;
 }
 
+.foot {
+  margin-top: 16px;
+  padding: 12px 16px 4px;
+  text-align: center;
+}
+
+.foot a {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.foot a:hover,
+.foot a:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .panel {
   grid-column: span 6;
   min-width: 0;

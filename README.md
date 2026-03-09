@@ -192,3 +192,5 @@ This repository includes a GitHub Actions workflow at `.github/workflows/release
 ## License
 
 GPL-3.0-only. See [`LICENSE`](LICENSE).
+
+Meshtastic® is a registered trademark of Meshtastic LLC. Meshtastic software components are released under various licenses, see GitHub for details. No warranty is provided - use at your own risk.
