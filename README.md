@@ -151,6 +151,12 @@ Dashboard includes:
 - node+type breakdown with ETA to threshold (per-port threshold unit)
 - recent alerts (active window)
 
+## Alert Cadence
+
+- `hour` thresholds alert at most once per `node_id + packet_type + UTC hour bucket`
+- `24h` thresholds alert at most once per rolling 24-hour window for `node_id + packet_type`
+- alerts are only evaluated when a new packet is received, so MeshPatrol does not resend on a timer by itself
+
 ## Data files
 
 By default, MeshPatrol creates/updates files in the working-directory `./meshpatrol-data/` folder:

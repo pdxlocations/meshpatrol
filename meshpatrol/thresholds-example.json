@@ -2,6 +2,7 @@
   "threshold_unit": "hour",
   "default_threshold": 120,
   "overrides": {
+    "ENCRYPTED": 60,
     "UNKNOWN_APP": 60,
     "TEXT_MESSAGE_APP": 60,
     "REMOTE_HARDWARE_APP": 30,

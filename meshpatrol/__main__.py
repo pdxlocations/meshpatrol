@@ -22,8 +22,23 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+PACKAGE_DIR = Path(__file__).resolve().parent
 APP_WORK_DIR = Path.cwd() / "meshpatrol-data"
 APP_DB_DIR = APP_WORK_DIR / "databases"
+DEFAULT_ALERT_TEMPLATE_PATH = PACKAGE_DIR / "templates" / "alert-message.txt"
+DEFAULT_ALERT_TEMPLATE_FALLBACK = (
+    "MeshPatrol alert: node {node_id} sent {count} packets of type "
+    "{packet_type} in {window_label}. "
+    "Please check your settings."
+)
+
+
+def read_text_file(path: Path, fallback: str) -> str:
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return fallback
+    return text or fallback
 
 APP_SETTINGS: dict[str, Any] = {
     # Interface type: "serial" or "tcp".
@@ -51,10 +66,9 @@ APP_SETTINGS: dict[str, Any] = {
     "default_threshold": 120,
     # Optional per-packet-type legacy overrides: ["POSITION_APP=300", "TELEMETRY_APP=180"]
     "threshold_overrides": [],
-    "alert_template": (
-        "MeshPatrol alert: node {node_id} sent {count} packets of type "
-        "{packet_type} in {window_label}. "
-        "Please check your settings."
+    "alert_template": read_text_file(
+        DEFAULT_ALERT_TEMPLATE_PATH,
+        DEFAULT_ALERT_TEMPLATE_FALLBACK,
     ),
     "log_level": "INFO",
     "web_ui": True,
@@ -1280,7 +1294,7 @@ class WebDashboard:
 
     def _build_app(self) -> Any:
         try:
-            from flask import Flask, jsonify
+            from flask import Flask, jsonify, render_template
         except ImportError as exc:
             raise RuntimeError("Flask is required when APP_SETTINGS['web_ui'] is True.") from exc
 
@@ -1289,276 +1303,7 @@ class WebDashboard:
 
         @app.get("/")
         def dashboard() -> str:
-            html = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MeshPatrol Packet Dashboard</title>
-  <link rel="stylesheet" href="/static/dashboard.css">
-</head>
-<body class="scanline">
-	  <div class="wrap">
-	    <div class="head">
-	      <div class="hero">
-	        <p class="eyebrow">Network Watch</p>
-	        <h1>MeshPatrol Realtime Packet Usage</h1>
-	      </div>
-		      <div class="stamp">
-		        <div><span class="stamp-label">Node</span> <span id="connectedId" class="mono">-</span></div>
-		        <div><span class="stamp-label">Short</span> <span id="connectedShort">-</span></div>
-		        <div><span class="stamp-label">Long</span> <span id="connectedLong">-</span></div>
-		        <div><span class="stamp-label">Total Packets (24 hrs)</span> <span id="totalPackets" class="mono">-</span></div>
-		        <div><span class="stamp-label">Window</span> <span id="window" class="mono">-</span></div>
-		        <div><span class="stamp-label">Updated</span> <span id="updated" class="mono">-</span></div>
-		      </div>
-	    </div>
-	    <div class="grid">
-			      <section class="panel panel-wide">
-			        <details class="pane-toggle" open>
-			          <summary>Recent Alerts</summary>
-			          <div class="pane-body">
-			            <div class="table-wrap">
-			              <table id="alerts">
-			                <thead><tr><th>Alert Time</th><th>Node</th><th>Short Name</th><th>Long Name</th><th>Type</th><th>Count</th><th>Message</th></tr></thead>
-			                <tbody></tbody>
-			              </table>
-			            </div>
-			            <div id="alertsMobile" class="mobile-list"></div>
-			          </div>
-			        </details>
-			      </section>
-				      <section class="panel panel-wide">
-				        <details class="pane-toggle">
-				          <summary>Node + Type Breakdown</summary>
-			          <div class="pane-body">
-			            <div class="table-wrap">
-			              <table id="nodeType">
-			                <thead><tr><th>Long Name</th><th>Short Name</th><th>Node Number</th><th>Type</th><th>Count</th><th>Threshold</th><th>Unit</th><th>ETA To Threshold</th><th>Alerted</th><th>Last Seen</th></tr></thead>
-			                <tbody></tbody>
-			              </table>
-			            </div>
-			            <div id="nodeTypeMobile" class="mobile-list"></div>
-			          </div>
-			        </details>
-			      </section>
-				      <section class="panel panel-wide">
-				        <details class="pane-toggle">
-				          <summary>Top Nodes (__WINDOW_LABEL__)</summary>
-			          <div class="pane-body">
-			            <div class="table-wrap">
-			              <table id="topNodes">
-			                <thead><tr><th>Node</th><th>Short Name</th><th>Long Name</th><th>Total Packets</th><th>Last Seen</th></tr></thead>
-			                <tbody></tbody>
-			              </table>
-			            </div>
-			            <div id="topNodesMobile" class="mobile-list"></div>
-			          </div>
-			        </details>
-		      </section>
-	      <section class="panel panel-wide">
-	        <details class="pane-toggle">
-	          <summary>Packet Types (__WINDOW_LABEL__)</summary>
-	          <div class="pane-body">
-	            <div class="table-wrap">
-	              <table id="byType">
-	                <thead><tr><th>Type</th><th>Total</th><th>Nodes</th></tr></thead>
-	                <tbody></tbody>
-	              </table>
-	            </div>
-	          </div>
-	        </details>
-	      </section>
-			      <section class="panel panel-wide">
-			        <details class="pane-toggle">
-			          <summary>Configured Thresholds</summary>
-			          <div class="pane-body">
-			            <div class="table-wrap">
-			              <table id="thresholds">
-			                <thead><tr><th>Type</th><th>Threshold</th><th>Unit</th></tr></thead>
-			                <tbody></tbody>
-			              </table>
-			            </div>
-			          </div>
-			        </details>
-			      </section>
-		    </div>
-		    <footer class="foot">
-		      <a href="https://github.com/pdxlocations/meshpatrol" target="_blank" rel="noopener noreferrer">
-		        View Project on GitHub
-		      </a>
-		    </footer>
-		  </div>
-		  <script>
-	    function fillTable(id, rows, cells) {
-	      const table = document.getElementById(id);
-	      const body = table.querySelector('tbody');
-	      const labels = Array.from(table.querySelectorAll('thead th')).map((th) => th.textContent || '');
-	      body.innerHTML = '';
-	      if (!rows || rows.length === 0) {
-	        const tr = document.createElement('tr');
-	        const td = document.createElement('td');
-        td.className = 'empty';
-        td.colSpan = cells.length;
-        td.textContent = 'No data yet';
-        tr.appendChild(td);
-        body.appendChild(tr);
-        return;
-      }
-	      rows.forEach((row) => {
-	        const tr = document.createElement('tr');
-	        cells.forEach((key, index) => {
-	          const td = document.createElement('td');
-	          const v = row[key];
-	          td.dataset.label = labels[index] || '';
-	          td.textContent = v === null || v === undefined ? '' : String(v);
-	          tr.appendChild(td);
-	        });
-	        body.appendChild(tr);
-      });
-    }
-
-	    function render(data) {
-	      const textOrDash = (value) => {
-	        if (value === null || value === undefined) return '-';
-	        const text = String(value).trim();
-	        return text || '-';
-	      };
-	      const renderMobileList = (id, rows, buildCard) => {
-	        const root = document.getElementById(id);
-	        root.innerHTML = '';
-	        if (!rows || rows.length === 0) {
-	          const empty = document.createElement('div');
-	          empty.className = 'mobile-empty';
-	          empty.textContent = 'No data yet';
-	          root.appendChild(empty);
-	          return;
-	        }
-	        rows.forEach((row) => root.appendChild(buildCard(row)));
-	      };
-	      const addMobileField = (card, label, value, extraClass) => {
-	        if (value === null || value === undefined) return;
-	        const text = String(value).trim();
-	        if (!text) return;
-	        const row = document.createElement('div');
-	        row.className = 'mobile-field' + (extraClass ? ' ' + extraClass : '');
-	        const key = document.createElement('span');
-	        key.className = 'mobile-field-label';
-	        key.textContent = label;
-	        const val = document.createElement('span');
-	        val.className = 'mobile-field-value';
-	        val.textContent = text;
-	        row.appendChild(key);
-	        row.appendChild(val);
-	        card.appendChild(row);
-	      };
-		      const buildNodeTypeCard = (row) => {
-		        const card = document.createElement('article');
-		        card.className = 'mobile-card';
-		        const title = document.createElement('div');
-		        title.className = 'mobile-card-title';
-		        title.textContent = textOrDash(row.long_name) !== '-' ? textOrDash(row.long_name) : (textOrDash(row.short_name) !== '-' ? textOrDash(row.short_name) : textOrDash(row.node_id));
-		        card.appendChild(title);
-		        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
-		        addMobileField(card, 'Node Number', row.node_id, 'mono');
-		        addMobileField(card, 'Type', row.packet_type);
-		        addMobileField(card, 'Status', `${textOrDash(row.count)} of ${textOrDash(row.threshold)} ${textOrDash(row.threshold_unit)}`);
-		        if (textOrDash(row.eta_to_threshold) !== '-') addMobileField(card, 'ETA To Threshold', row.eta_to_threshold);
-		        if (textOrDash(row.alerted_local) !== '-') addMobileField(card, 'Alerted', row.alerted_local);
-		        if (textOrDash(row.last_seen_local) !== '-') addMobileField(card, 'Last Seen', row.last_seen_local);
-		        return card;
-		      };
-	      const buildAlertCard = (row) => {
-	        const card = document.createElement('article');
-	        card.className = 'mobile-card';
-	        const title = document.createElement('div');
-	        title.className = 'mobile-card-title';
-	        title.textContent = textOrDash(row.packet_type);
-	        card.appendChild(title);
-		        if (textOrDash(row.message) !== '-') {
-		          const sub = document.createElement('div');
-		          sub.className = 'mobile-card-subtitle';
-		          sub.textContent = row.message;
-		          card.appendChild(sub);
-		        }
-		        addMobileField(card, 'Alert Time', row.alert_local);
-		        addMobileField(card, 'Node', row.node_id, 'mono');
-		        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
-		        if (textOrDash(row.long_name) !== '-') addMobileField(card, 'Long Name', row.long_name);
-		        addMobileField(card, 'Count', row.count_at_alert);
-		        return card;
-		      };
-		      const buildTopNodeCard = (row) => {
-			        const card = document.createElement('article');
-			        card.className = 'mobile-card';
-			        const title = document.createElement('div');
-			        title.className = 'mobile-card-title';
-			        title.textContent = textOrDash(row.long_name) !== '-' ? textOrDash(row.long_name) : (textOrDash(row.short_name) !== '-' ? textOrDash(row.short_name) : textOrDash(row.node_id));
-			        card.appendChild(title);
-			        if (textOrDash(row.short_name) !== '-') addMobileField(card, 'Short Name', row.short_name);
-			        addMobileField(card, 'Node Number', row.node_id, 'mono');
-			        addMobileField(card, 'Node ID', formatHexNodeId(row.node_id), 'mono');
-			        addMobileField(card, 'Total Packets', row.total_count);
-		        if (textOrDash(row.last_seen_local) !== '-') addMobileField(card, 'Last Seen', row.last_seen_local);
-		        return card;
-		      };
-	      const formatUnit = (u) => {
-	        if (u === '24h') return 'per 24h';
-	        if (u === 'hour') return 'per hour';
-	        return u || '';
-	      };
-	      const formatHexNodeId = (value) => {
-	        const text = textOrDash(value);
-	        if (text === '-') return '-';
-	        try {
-	          return '!' + BigInt(text).toString(16).padStart(8, '0');
-	        } catch {
-	          return text;
-	        }
-	      };
-	      const start = data.window_start_local || '-';
-	      const end = data.window_end_local || data.generated_local || '-';
-		      document.getElementById('connectedId').textContent = data.connected_node_id || '-';
-		      document.getElementById('connectedShort').textContent = data.connected_short_name || '-';
-		      document.getElementById('connectedLong').textContent = data.connected_long_name || '-';
-		      document.getElementById('totalPackets').textContent = String(data.total_packets ?? '-');
-		      document.getElementById('window').textContent = start + ' -> ' + end;
-	      document.getElementById('updated').textContent = data.generated_local || '-';
-
-		      fillTable('topNodes', data.top_nodes, ['node_id', 'short_name', 'long_name', 'total_count', 'last_seen_local']);
-	      fillTable('byType', data.by_type, ['packet_type', 'total_count', 'distinct_nodes']);
-	      const thresholds = (data.thresholds || []).map((row) => ({
-	        ...row,
-	        unit: formatUnit(row.unit),
-      }));
-	      const nodeTypeRows = (data.node_type_rows || []).map((row) => ({
-	        ...row,
-	        threshold_unit: formatUnit(row.threshold_unit),
-	      }));
-	      fillTable('thresholds', thresholds, ['packet_type', 'threshold', 'unit']);
-	      fillTable('nodeType', nodeTypeRows, ['long_name', 'short_name', 'node_id', 'packet_type', 'count', 'threshold', 'threshold_unit', 'eta_to_threshold', 'alerted_local', 'last_seen_local']);
-	      fillTable('alerts', data.alerts, ['alert_local', 'node_id', 'short_name', 'long_name', 'packet_type', 'count_at_alert', 'message']);
-	      renderMobileList('nodeTypeMobile', nodeTypeRows, buildNodeTypeCard);
-	      renderMobileList('alertsMobile', data.alerts, buildAlertCard);
-	      renderMobileList('topNodesMobile', data.top_nodes, buildTopNodeCard);
-	    }
-
-    async function fetchOnce() {
-      const res = await fetch('/api/snapshot', {cache: 'no-store'});
-      if (!res.ok) throw new Error('snapshot request failed');
-      render(await res.json());
-    }
-
-    fetchOnce().catch(() => {});
-    setInterval(() => {
-      fetchOnce().catch(() => {});
-    }, 30000);
-  </script>
-</body>
-</html>"""
-            return (
-                html.replace("__WINDOW_LABEL__", window_label)
-            )
+            return render_template("dashboard.html", window_label=window_label)
 
         @app.get("/api/snapshot")
         def api_snapshot() -> Any:
