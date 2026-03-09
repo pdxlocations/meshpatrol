@@ -34,7 +34,6 @@ git clone https://github.com/pdxlocations/meshpatrol.git
 cd meshpatrol
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -U pip
 pip install -e .
 ```
 
@@ -171,30 +170,6 @@ If WAL mode is active, you may also see `-wal` and `-shm` sidecar files.
 ## Logging
 
 Logging is controlled by `APP_SETTINGS["log_level"]` and defaults to `INFO`.
-
-## Development
-
-Install editable with dependencies:
-
-```bash
-pip install -e .
-```
-
-Run directly:
-
-```bash
-python -m meshpatrol
-```
-
-## Release process
-
-This repository includes a GitHub Actions workflow at `.github/workflows/release.yaml` that:
-
-1. triggers on semantic version tags (for example: `1.2.3`, `1.2.3rc1`)
-2. checks the new tag version is greater than the latest on PyPI
-3. builds with Poetry
-4. publishes artifacts to PyPI
-5. creates a GitHub Release with generated notes
 
 ## License
 
