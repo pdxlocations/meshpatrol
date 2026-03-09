@@ -1,4 +1,5 @@
 # MeshPatrol
+<img width="1197" height="779" alt="Screenshot 2026-03-08 at 9 51 19 PM" src="https://github.com/user-attachments/assets/d3dc0013-9447-4bc5-84e3-e5f70a24833c" />
 
 MeshPatrol is a Meshtastic packet-monitoring bot that:
 
