@@ -107,7 +107,7 @@ APP_SETTINGS = {
 - `thresholds_path`: JSON file for threshold configuration.
 - `threshold_unit`: legacy fallback default unit if missing from thresholds JSON (`"hour"` or `"24h"`).
 - `default_threshold` / `threshold_overrides`: legacy fallback only, used if `thresholds_path` file is missing.
-- `alert_template`: DM text. Supports `{node_id}`, `{packet_type}`, `{count}`, `{threshold}`, `{hour_bucket}`, `{window_label}`, `{threshold_unit}`.
+- `alert_template`: fallback DM text used when the thresholds JSON does not define `default_alert_template`. Supports `{node_id}`, `{packet_type}`, `{count}`, `{threshold}`, `{hour_bucket}`, `{window_label}`, `{threshold_unit}`.
 - `web_ui`: enable/disable dashboard.
 - `meshdb_path`: SQLite file used by `meshdb` packet storage.
 - `counter_db_path`: SQLite file used for rate counters and alert history.
@@ -120,11 +120,17 @@ APP_SETTINGS = {
 {
   "threshold_unit": "hour",
   "default_threshold": 120,
+  "default_alert_template": "MeshPatrol alert: node {node_id} sent {count} packets of type {packet_type} in {window_label}. Please check your settings.",
   "overrides": {
     "POSITION_APP": 300,
     "TELEMETRY_APP": {
       "threshold": 180,
       "unit": "24h"
+    },
+    "POSITION_REPEATED": {
+      "threshold": 1,
+      "unit": "24h",
+      "alert_template": "MeshPatrol alert: node {node_id} reported the same position {position_repeat_count} times in {window_label}. Please check tracking settings."
     }
   }
 }
@@ -132,9 +138,12 @@ APP_SETTINGS = {
 
 - `threshold_unit`: default unit (`"hour"` or `"24h"`) for entries that do not specify a unit.
 - `default_threshold`: fallback threshold value in the default unit for packet types without an override.
+- `default_alert_template`: default DM template used for packet types without their own override template.
 - `overrides`: per-port thresholds keyed by Meshtastic port name. Each value can be:
   - integer: threshold using default `threshold_unit`
-  - object: `{ "threshold": <int>, "unit": "hour" | "24h" }` for per-port unit override
+  - object: `{ "threshold": <int>, "unit": "hour" | "24h", "alert_template": "<text>" }` for per-port unit and alert-template override
+
+`POSITION_REPEATED` is a synthetic packet type emitted when the same normalized position is seen 3 times from the same node within a rolling 24-hour window. A threshold of `1` on `POSITION_REPEATED` therefore alerts on the first such repeat event.
 
 ## Dashboard and API
 

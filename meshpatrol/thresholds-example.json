@@ -1,6 +1,7 @@
 {
   "threshold_unit": "hour",
   "default_threshold": 120,
+  "default_alert_template": "🚨 MeshPatrol alert 🚨: node {node_id} sent {count} packets of type {packet_type} in {window_label}. Please check your settings.",
   "overrides": {
     "ENCRYPTED": 60,
     "UNKNOWN_APP": 60,
@@ -9,6 +10,11 @@
     "POSITION_APP": {
       "threshold": 100,
       "unit": "24h"
+    },
+    "POSITION_REPEATED": {
+      "threshold": 3,
+      "unit": "24h",
+      "alert_template": "🚨 MeshPatrol alert 🚨: node {node_id} reported the same position {position_repeat_count} times in {window_label}. Please check positon settings."
     },
     "NODEINFO_APP": {
       "threshold": 20,

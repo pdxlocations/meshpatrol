@@ -111,7 +111,11 @@ FALLBACK_PORTNUMS: tuple[str, ...] = (
     "CAYENNE_APP",
     "PRIVATE_APP",
     "ATAK_FORWARDER",
+    "POSITION_REPEATED",
 )
+POSITION_REPEATED_PORTNUM = "POSITION_REPEATED"
+POSITION_REPEAT_TRIGGER_COUNT = 3
+POSITION_REPEAT_WINDOW_HOURS = 24
 
 
 def parse_tcp_target(value: str) -> tuple[str, int]:
@@ -235,6 +239,50 @@ def packet_type_of(packet: dict[str, Any]) -> str:
     return "UNKNOWN"
 
 
+def _position_component(value: Any, *, precision: int = 6) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, int):
+        return str(value)
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return f"{float(text):.{precision}f}"
+    except ValueError:
+        return text
+
+
+def position_key_of(packet: dict[str, Any]) -> str:
+    decoded = packet.get("decoded") or {}
+    candidates = []
+    position = decoded.get("position")
+    if isinstance(position, dict):
+        candidates.append(position)
+    if isinstance(decoded, dict):
+        candidates.append(decoded)
+    candidates.append(packet)
+
+    for source in candidates:
+        latitude_i = source.get("latitudeI", source.get("latitude_i"))
+        longitude_i = source.get("longitudeI", source.get("longitude_i"))
+        if latitude_i is not None and longitude_i is not None:
+            lat_text = _position_component(latitude_i)
+            lon_text = _position_component(longitude_i)
+            if lat_text and lon_text:
+                return f"i:{lat_text},{lon_text}"
+
+        latitude = source.get("latitude", source.get("lat"))
+        longitude = source.get("longitude", source.get("lon"))
+        if latitude is not None and longitude is not None:
+            lat_text = _position_component(latitude)
+            lon_text = _position_component(longitude)
+            if lat_text and lon_text:
+                return f"f:{lat_text},{lon_text}"
+
+    return ""
+
+
 def node_id_of(packet: dict[str, Any]) -> str:
     from_id = packet.get("fromId") or packet.get("from")
     if from_id is None:
@@ -293,9 +341,10 @@ def parse_threshold_overrides(
     *,
     default: int,
     default_unit: str,
-) -> tuple[dict[str, int], dict[str, str]]:
+) -> tuple[dict[str, int], dict[str, str], dict[str, str]]:
     thresholds: dict[str, int] = {}
     threshold_units: dict[str, str] = {}
+    alert_templates: dict[str, str] = {}
     normalized_default_unit = normalize_threshold_unit(default_unit)
     for packet_type, override_value in overrides.items():
         pkt_type = str(packet_type).strip()
@@ -303,9 +352,11 @@ def parse_threshold_overrides(
             raise ValueError("Threshold overrides cannot contain an empty packet type")
         count_raw: Any = override_value
         unit_raw: Any = normalized_default_unit
+        alert_template_raw: Any = None
         if isinstance(override_value, dict):
             count_raw = override_value.get("threshold", override_value.get("count"))
             unit_raw = override_value.get("unit", normalized_default_unit)
+            alert_template_raw = override_value.get("alert_template")
         try:
             count = int(count_raw)
         except (TypeError, ValueError) as exc:
@@ -314,10 +365,15 @@ def parse_threshold_overrides(
             raise ValueError(f"Threshold override for '{pkt_type}' must be > 0")
         thresholds[pkt_type] = count
         threshold_units[pkt_type] = normalize_threshold_unit(unit_raw)
+        if alert_template_raw is not None:
+            alert_template = str(alert_template_raw).strip()
+            if not alert_template:
+                raise ValueError(f"Threshold override for '{pkt_type}' has an empty alert_template")
+            alert_templates[pkt_type] = alert_template
 
     thresholds["*"] = thresholds.get("*", default)
     threshold_units["*"] = threshold_units.get("*", normalized_default_unit)
-    return thresholds, threshold_units
+    return thresholds, threshold_units, alert_templates
 
 
 def load_threshold_settings(
@@ -326,7 +382,8 @@ def load_threshold_settings(
     fallback_default: int,
     fallback_overrides: list[str],
     fallback_threshold_unit: str,
-) -> tuple[int, dict[str, int], str, dict[str, str]]:
+    fallback_alert_template: str,
+) -> tuple[int, dict[str, int], str, dict[str, str], dict[str, str]]:
     if not path.exists():
         logging.warning(
             "Thresholds file not found at %s; using legacy APP_SETTINGS thresholds",
@@ -336,7 +393,8 @@ def load_threshold_settings(
         thresholds = parse_thresholds(fallback_overrides, default_threshold)
         threshold_unit = normalize_threshold_unit(fallback_threshold_unit)
         threshold_units = {key: threshold_unit for key in thresholds}
-        return default_threshold, thresholds, threshold_unit, threshold_units
+        alert_templates = {"*": str(fallback_alert_template).strip()}
+        return default_threshold, thresholds, threshold_unit, threshold_units, alert_templates
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -361,12 +419,18 @@ def load_threshold_settings(
     threshold_unit = normalize_threshold_unit(
         payload.get("threshold_unit", fallback_threshold_unit)
     )
-    thresholds, threshold_units = parse_threshold_overrides(
+    default_alert_template = str(
+        payload.get("default_alert_template", fallback_alert_template)
+    ).strip()
+    if not default_alert_template:
+        raise ValueError("default_alert_template must not be empty")
+    thresholds, threshold_units, alert_templates = parse_threshold_overrides(
         overrides_raw,
         default=default_threshold,
         default_unit=threshold_unit,
     )
-    return default_threshold, thresholds, threshold_unit, threshold_units
+    alert_templates["*"] = alert_templates.get("*", default_alert_template)
+    return default_threshold, thresholds, threshold_unit, threshold_units, alert_templates
 
 
 def _all_portnums() -> list[str]:
@@ -375,7 +439,10 @@ def _all_portnums() -> list[str]:
     except Exception:
         return list(FALLBACK_PORTNUMS)
 
-    return [v.name for v in portnums_pb2._PORTNUM.values if v.name != "MAX"]
+    names = [v.name for v in portnums_pb2._PORTNUM.values if v.name != "MAX"]
+    if POSITION_REPEATED_PORTNUM not in names:
+        names.append(POSITION_REPEATED_PORTNUM)
+    return names
 
 
 def _load_thresholds_example_template() -> dict[str, Any] | None:
@@ -409,6 +476,10 @@ def ensure_thresholds_file(path: Path, *, default_threshold: int, default_unit: 
         template = {
             "threshold_unit": unit,
             "default_threshold": threshold_value,
+            "default_alert_template": read_text_file(
+                DEFAULT_ALERT_TEMPLATE_PATH,
+                DEFAULT_ALERT_TEMPLATE_FALLBACK,
+            ),
             "overrides": {name: threshold_value for name in _all_portnums()},
         }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -455,6 +526,16 @@ class PacketCounterDB:
                 alert_utc TEXT NOT NULL,
                 message TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS position_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id TEXT NOT NULL,
+                position_key TEXT NOT NULL,
+                seen_utc TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_position_observations_lookup
+                ON position_observations (node_id, position_key, seen_utc);
             """
         )
         self._conn.commit()
@@ -571,6 +652,41 @@ class PacketCounterDB:
                 WHERE node_id = ? AND packet_type = ? AND hour_bucket = ?
                 """,
                 (canonical_node_id, packet_type, hour_bucket),
+            ).fetchone()
+            self._conn.commit()
+            return int(row[0]) if row else 0
+
+    def record_position_observation(
+        self,
+        *,
+        node_id: str,
+        position_key: str,
+        seen_utc: str,
+        since_utc: str,
+    ) -> int:
+        canonical_node_id = self._canonical_node_id(node_id)
+        with self._lock:
+            self._conn.execute(
+                """
+                DELETE FROM position_observations
+                WHERE node_id = ? AND position_key = ? AND seen_utc < ?
+                """,
+                (canonical_node_id, position_key, since_utc),
+            )
+            self._conn.execute(
+                """
+                INSERT INTO position_observations (node_id, position_key, seen_utc)
+                VALUES (?, ?, ?)
+                """,
+                (canonical_node_id, position_key, seen_utc),
+            )
+            row = self._conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM position_observations
+                WHERE node_id = ? AND position_key = ? AND seen_utc >= ?
+                """,
+                (canonical_node_id, position_key, since_utc),
             ).fetchone()
             self._conn.commit()
             return int(row[0]) if row else 0
@@ -853,7 +969,7 @@ class Config:
     default_threshold: int
     thresholds: dict[str, int]
     threshold_units: dict[str, str]
-    alert_template: str
+    alert_templates: dict[str, str]
     web_ui: bool
     web_host: str
     web_port: int
@@ -870,6 +986,9 @@ class PacketMonitorBot:
 
     def threshold_unit_for(self, packet_type: str) -> str:
         return self.cfg.threshold_units.get(packet_type, self.cfg.threshold_units["*"])
+
+    def alert_template_for(self, packet_type: str) -> str:
+        return self.cfg.alert_templates.get(packet_type, self.cfg.alert_templates["*"])
 
     def sync_interface_nodes(self, interface: Any) -> None:
         owner_node_num = self._local_node_num(interface)
@@ -891,8 +1010,6 @@ class PacketMonitorBot:
         if packet_type == "SIMULATOR_APP":
             logging.debug("Ignoring simulator packet: node=%s", node_id)
             return
-        threshold = self.threshold_for(packet_type)
-        threshold_unit = self.threshold_unit_for(packet_type)
 
         owner_node_num = self._owner_node_num(interface, packet)
 
@@ -907,12 +1024,67 @@ class PacketMonitorBot:
             logging.debug("Ignoring connected-node packet: node=%s type=%s", node_id, packet_type)
             return
 
+        self._process_threshold_event(
+            interface=interface,
+            node_id=node_id,
+            packet_type=packet_type,
+            now_iso=now_iso,
+            hour_bucket_utc=hour_bucket_utc,
+            hour_bucket_local=hour_bucket_local,
+        )
+
+        if packet_type != "POSITION_APP":
+            return
+
+        position_key = position_key_of(packet)
+        if not position_key:
+            return
+
+        repeat_window_start = (
+            now - timedelta(hours=POSITION_REPEAT_WINDOW_HOURS)
+        ).isoformat()
+        repeat_count = self.counter_db.record_position_observation(
+            node_id=node_id,
+            position_key=position_key,
+            seen_utc=now_iso,
+            since_utc=repeat_window_start,
+        )
+        if repeat_count != POSITION_REPEAT_TRIGGER_COUNT:
+            return
+
+        self._process_threshold_event(
+            interface=interface,
+            node_id=node_id,
+            packet_type=POSITION_REPEATED_PORTNUM,
+            now_iso=now_iso,
+            hour_bucket_utc=hour_bucket_utc,
+            hour_bucket_local=hour_bucket_local,
+            extra_template_fields={
+                "position_key": position_key,
+                "position_repeat_count": repeat_count,
+            },
+        )
+
+    def _process_threshold_event(
+        self,
+        *,
+        interface: Any,
+        node_id: str,
+        packet_type: str,
+        now_iso: str,
+        hour_bucket_utc: str,
+        hour_bucket_local: str,
+        extra_template_fields: dict[str, Any] | None = None,
+    ) -> None:
+        threshold = self.threshold_for(packet_type)
+        threshold_unit = self.threshold_unit_for(packet_type)
         count = self.counter_db.increment_and_fetch(
             node_id=node_id,
             packet_type=packet_type,
             hour_bucket=hour_bucket_utc,
             seen_utc=now_iso,
         )
+        now = datetime.fromisoformat(now_iso)
         window_hours = 24 if threshold_unit == "24h" else 1
         window_start_utc = (now - timedelta(hours=window_hours)).isoformat()
         window_label = "last 24 hours" if window_hours == 24 else "this hour"
@@ -950,17 +1122,20 @@ class PacketMonitorBot:
             ):
                 return
 
-        alert_message = self.cfg.alert_template.format(
-            node_id=node_id,
-            packet_type=packet_type,
-            threshold=threshold,
-            hour_bucket=hour_bucket_local,
-            hour_bucket_local=hour_bucket_local,
-            hour_bucket_utc=hour_bucket_utc,
-            count=count_for_window,
-            threshold_unit=threshold_unit,
-            window_label=window_label,
-        )
+        alert_context = {
+            "node_id": node_id,
+            "packet_type": packet_type,
+            "threshold": threshold,
+            "hour_bucket": hour_bucket_local,
+            "hour_bucket_local": hour_bucket_local,
+            "hour_bucket_utc": hour_bucket_utc,
+            "count": count_for_window,
+            "threshold_unit": threshold_unit,
+            "window_label": window_label,
+        }
+        if extra_template_fields:
+            alert_context.update(extra_template_fields)
+        alert_message = self.alert_template_for(packet_type).format(**alert_context)
 
         sent = self._send_dm(interface, node_id=node_id, message=alert_message)
         if not sent:
@@ -1353,11 +1528,12 @@ def run(argv: list[str] | None = None) -> int:
     )
 
     try:
-        default_threshold, thresholds, threshold_unit, threshold_units = load_threshold_settings(
+        default_threshold, thresholds, threshold_unit, threshold_units, alert_templates = load_threshold_settings(
             path=thresholds_path,
             fallback_default=int(app["default_threshold"]),
             fallback_overrides=list(app.get("threshold_overrides", [])),
             fallback_threshold_unit=str(app.get("threshold_unit", "hour")),
+            fallback_alert_template=str(app["alert_template"]),
         )
     except ValueError as exc:
         logging.error("Invalid threshold settings: %s", exc)
@@ -1375,7 +1551,7 @@ def run(argv: list[str] | None = None) -> int:
         default_threshold=default_threshold,
         thresholds=thresholds,
         threshold_units=threshold_units,
-        alert_template=str(app["alert_template"]),
+        alert_templates=alert_templates,
         web_ui=bool(app["web_ui"]),
         web_host=str(app["web_host"]),
         web_port=int(app["web_port"]),

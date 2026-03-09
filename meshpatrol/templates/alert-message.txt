@@ -1,1 +1,0 @@
-🚨 MeshPatrol alert: node {node_id} sent {count} packets of type {packet_type} in {window_label}. Please check your settings.
