@@ -1328,9 +1328,9 @@ class WebDashboard:
 			          </div>
 			        </details>
 			      </section>
-			      <section class="panel panel-wide">
-			        <details class="pane-toggle" open>
-			          <summary>Node + Type Breakdown</summary>
+				      <section class="panel panel-wide">
+				        <details class="pane-toggle">
+				          <summary>Node + Type Breakdown</summary>
 			          <div class="pane-body">
 			            <div class="table-wrap">
 			              <table id="nodeType">
@@ -1342,9 +1342,9 @@ class WebDashboard:
 			          </div>
 			        </details>
 			      </section>
-			      <section class="panel panel-wide">
-			        <details class="pane-toggle" open>
-			          <summary>Top Nodes (__WINDOW_LABEL__)</summary>
+				      <section class="panel panel-wide">
+				        <details class="pane-toggle">
+				          <summary>Top Nodes (__WINDOW_LABEL__)</summary>
 			          <div class="pane-body">
 			            <div class="table-wrap">
 			              <table id="topNodes">
@@ -1357,7 +1357,7 @@ class WebDashboard:
 			        </details>
 		      </section>
 	      <section class="panel panel-wide">
-	        <details class="pane-toggle" open>
+	        <details class="pane-toggle">
 	          <summary>Packet Types (__WINDOW_LABEL__)</summary>
 	          <div class="pane-body">
 	            <div class="table-wrap">
