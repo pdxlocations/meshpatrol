@@ -1,0 +1,9 @@
+# Only package sources and metadata belong in the build context.
+**
+!pyproject.toml
+!README.md
+!LICENSE
+!meshpatrol/
+!meshpatrol/**
+**/__pycache__/
+**/*.pyc

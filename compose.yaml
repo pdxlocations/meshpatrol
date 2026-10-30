@@ -1,0 +1,13 @@
+services:
+  meshpatrol:
+    build: .
+    image: meshpatrol:local
+    init: true
+    restart: unless-stopped
+    # vnode joins the LAN multicast group; publishing UDP ports is insufficient.
+    network_mode: host
+    volumes:
+      - meshpatrol_data:/app/meshpatrol-data
+
+volumes:
+  meshpatrol_data:

@@ -41,8 +41,9 @@ def read_text_file(path: Path, fallback: str) -> str:
     return text or fallback
 
 APP_SETTINGS: dict[str, Any] = {
-    # Interface type: "serial" or "tcp".
-    "interface": "serial",
+    # Interface type: "vnode", "serial", or "tcp".
+    "interface": "vnode",
+    "vnode_file": str(APP_WORK_DIR / "node.json"),
     # Meshtastic serial device path. Use None for default auto-detected device.
     "port": None,
     # Meshtastic TCP target (used when interface == "tcp").
@@ -154,6 +155,11 @@ def parse_cli_overrides(argv: list[str] | None = None) -> dict[str, Any]:
     parser = argparse.ArgumentParser(description="MeshPatrol packet monitor")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
+        "--vnode-file",
+        metavar="PATH",
+        help="Use vnode with this identity/config file (default: meshpatrol-data/node.json)",
+    )
+    group.add_argument(
         "--serial",
         metavar="DEVPATH",
         help="Use serial interface with selected device path",
@@ -167,6 +173,9 @@ def parse_cli_overrides(argv: list[str] | None = None) -> dict[str, Any]:
     args = parser.parse_args(argv)
     overrides: dict[str, Any] = {}
 
+    if args.vnode_file:
+        overrides["interface"] = "vnode"
+        overrides["vnode_file"] = args.vnode_file
     if args.serial:
         overrides["interface"] = "serial"
         overrides["port"] = str(args.serial).strip()
@@ -962,6 +971,7 @@ class Config:
     port: str | None
     tcp_hostname: str
     tcp_port: int
+    vnode_file: Path
     meshdb_path: Path
     counter_db_path: Path
     ignore_connected_node: bool
@@ -1013,10 +1023,12 @@ class PacketMonitorBot:
 
         owner_node_num = self._owner_node_num(interface, packet)
 
-        try:
-            self.mesh_store.save_packet(packet, owner_node_num=owner_node_num)
-        except Exception:
-            logging.exception("Failed to persist packet to meshdb")
+        # vnode persists decoded packets in its own channel-scoped meshdb store.
+        if self.cfg.interface != "vnode":
+            try:
+                self.mesh_store.save_packet(packet, owner_node_num=owner_node_num)
+            except Exception:
+                logging.exception("Failed to persist packet to meshdb")
 
         if self.cfg.ignore_connected_node and self._is_connected_node_packet(
             packet, interface
@@ -1155,7 +1167,11 @@ class PacketMonitorBot:
 
     @staticmethod
     def _local_node_num(interface: Any) -> int | None:
-        # Use Meshtastic's explicit local node lookup only.
+        # vnode exposes its local identity directly.
+        node_num = int_from_node_id(getattr(interface, "node_num", None))
+        if node_num is not None:
+            return node_num
+        # Hardware interfaces expose the local node through getNode().
         get_node = getattr(interface, "getNode", None)
         if callable(get_node):
             try:
@@ -1227,7 +1243,9 @@ class WebDashboard:
         threshold_units: dict[str, str],
         host: str,
         port: int,
+        meshdb_scope: dict[str, Any] | None = None,
     ) -> None:
+        self._meshdb_scope = meshdb_scope or {}
         self._counter_db = counter_db
         self._meshdb_path = meshdb_path
         self._thresholds = thresholds
@@ -1307,7 +1325,9 @@ class WebDashboard:
             try:
                 import meshdb  # type: ignore
 
-                node_db = meshdb.NodeDB(owner_node_num, str(self._meshdb_path))
+                node_db = meshdb.NodeDB(
+                    owner_node_num, str(self._meshdb_path), **self._meshdb_scope
+                )
                 with node_db.connect() as conn:
                     conn.row_factory = sqlite3.Row
                     sql = (
@@ -1504,6 +1524,18 @@ class WebDashboard:
         self._thread.start()
 
 
+def create_virtual_node(config_path: Path) -> Any:
+    """Load a persistent vnode identity and apply MeshPatrol's advertised names."""
+    from vnode import NodeConfig, VirtualNode
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config = NodeConfig.load(config_path)
+    config.long_name = "MeshPatrol"
+    config.short_name = "🚨"
+    config.save(config_path)
+    return VirtualNode(config_path)
+
+
 def run(argv: list[str] | None = None) -> int:
     app = dict(APP_SETTINGS)
     try:
@@ -1540,7 +1572,8 @@ def run(argv: list[str] | None = None) -> int:
         return 2
 
     cfg = Config(
-        interface=str(app.get("interface", "serial")).strip().lower(),
+        interface=str(app.get("interface", "vnode")).strip().lower(),
+        vnode_file=Path(str(app["vnode_file"])),
         port=app.get("port"),
         tcp_hostname=str(app.get("tcp_hostname", "127.0.0.1")).strip(),
         tcp_port=int(app.get("tcp_port", 4403)),
@@ -1556,8 +1589,8 @@ def run(argv: list[str] | None = None) -> int:
         web_host=str(app["web_host"]),
         web_port=int(app["web_port"]),
     )
-    if cfg.interface not in {"serial", "tcp"}:
-        logging.error("APP_SETTINGS['interface'] must be 'serial' or 'tcp'")
+    if cfg.interface not in {"vnode", "serial", "tcp"}:
+        logging.error("APP_SETTINGS['interface'] must be 'vnode', 'serial', or 'tcp'")
         return 2
     if cfg.interface == "tcp":
         if not cfg.tcp_hostname:
@@ -1578,8 +1611,6 @@ def run(argv: list[str] | None = None) -> int:
     web_dashboard: WebDashboard | None = None
 
     try:
-        from meshtastic.serial_interface import SerialInterface  # type: ignore
-        from meshtastic.tcp_interface import TCPInterface  # type: ignore
         from pubsub import pub  # type: ignore
     except ImportError as exc:
         logging.error(
@@ -1599,12 +1630,42 @@ def run(argv: list[str] | None = None) -> int:
             return
         bot.sync_interface_nodes(interface)
 
+    iface: Any = None
+    receive_subscribed = False
+    node_updates_subscribed = False
     try:
+        dashboard_meshdb_path = cfg.meshdb_path
+        dashboard_meshdb_scope: dict[str, Any] = {}
+        if cfg.interface == "vnode":
+            iface = create_virtual_node(cfg.vnode_file)
+            from mudp.encryption import generate_hash
+
+            dashboard_meshdb_path = Path(iface.meshdb_path)
+            dashboard_meshdb_scope = {
+                "channel": generate_hash(iface.config.channel.name, iface.config.channel.psk),
+                "channel_name": iface.config.channel.name,
+                "storage_name": str(iface.node_num),
+            }
+            logging.info("Using vnode %s (%s / %s)", iface.config.node_id,
+                         iface.getLongName(), iface.getShortName())
+        elif cfg.interface == "tcp":
+            from meshtastic.tcp_interface import TCPInterface
+
+            iface = TCPInterface(hostname=cfg.tcp_hostname, portNumber=cfg.tcp_port)
+            logging.info("Connected via Meshtastic TCP interface %s:%d",
+                         cfg.tcp_hostname, cfg.tcp_port)
+        else:
+            from meshtastic.serial_interface import SerialInterface
+
+            iface = SerialInterface(devPath=cfg.port) if cfg.port else SerialInterface()
+            logging.info("Connected via Meshtastic serial interface %s", cfg.port or "auto-detect")
+
         if cfg.web_ui:
             try:
                 web_dashboard = WebDashboard(
                     counter_db=bot.counter_db,
-                    meshdb_path=cfg.meshdb_path,
+                    meshdb_path=dashboard_meshdb_path,
+                    meshdb_scope=dashboard_meshdb_scope,
                     thresholds=cfg.thresholds,
                     threshold_units=cfg.threshold_units,
                     host=cfg.web_host,
@@ -1620,28 +1681,21 @@ def run(argv: list[str] | None = None) -> int:
                 logging.error(str(exc))
                 return 2
 
-        if cfg.interface == "tcp":
-            iface = TCPInterface(hostname=cfg.tcp_hostname, portNumber=cfg.tcp_port)
-            logging.info(
-                "Connected via Meshtastic TCP interface %s:%d",
-                cfg.tcp_hostname,
-                cfg.tcp_port,
-            )
-        else:
-            iface = SerialInterface(devPath=cfg.port) if cfg.port else SerialInterface()
-            if cfg.port:
-                logging.info("Connected via Meshtastic serial interface %s", cfg.port)
-            else:
-                logging.info("Connected via Meshtastic auto-detected serial interface")
-
         bot.sync_interface_nodes(iface)
 
         if web_dashboard:
             local_node_num = PacketMonitorBot._local_node_num(iface)
             if local_node_num is not None:
                 web_dashboard.set_connected_node_id(local_node_num)
-        pub.subscribe(_on_receive, "meshtastic.receive")
+        if cfg.interface == "vnode":
+            iface.receive(_on_receive)
+            receive_subscribed = True
+            iface.start()
+        else:
+            pub.subscribe(_on_receive, "meshtastic.receive")
+            receive_subscribed = True
         pub.subscribe(_on_node_updated, "meshtastic.node.updated")
+        node_updates_subscribed = True
         logging.info("Packet monitor started. Listening for meshtastic.receive")
 
         while True:
@@ -1649,12 +1703,25 @@ def run(argv: list[str] | None = None) -> int:
 
     except KeyboardInterrupt:
         logging.info("Shutting down")
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        logging.error("Unable to start MeshPatrol: %s", exc)
+        return 2
     finally:
-        bot.close()
         try:
-            iface.close()  # type: ignore[name-defined]
+            if iface is not None:
+                if receive_subscribed:
+                    if cfg.interface == "vnode":
+                        iface.unreceive(_on_receive)
+                    else:
+                        pub.unsubscribe(_on_receive, "meshtastic.receive")
+                if node_updates_subscribed:
+                    pub.unsubscribe(_on_node_updated, "meshtastic.node.updated")
+                # Stop background callbacks before closing the counter database.
+                iface.close()
         except Exception:
-            pass
+            logging.exception("Failed to close Meshtastic interface")
+        finally:
+            bot.close()
 
     return 0
 

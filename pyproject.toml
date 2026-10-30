@@ -7,9 +7,10 @@ authors = [
 ]
 license = "GPL-3.0-only"
 readme = "README.md"
-requires-python = ">=3.9,<3.15"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "meshtastic",
+    "vnode>=0.2.3,<0.3",
     "meshdb",
     "PyPubSub",
     "Flask"
