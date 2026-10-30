@@ -3,7 +3,7 @@
 
 MeshPatrol is a Meshtastic packet-monitoring bot that:
 
-- subscribes to incoming packets from a Meshtastic node (serial or TCP)
+- runs an embedded `vnode` virtual Meshtastic node and monitors incoming packets
 - stores packet payloads using `meshdb`
 - tracks per-node and per-packet-type hourly counts in SQLite
 - sends a direct message (DM) to nodes that exceed configured thresholds
@@ -11,9 +11,10 @@ MeshPatrol is a Meshtastic packet-monitoring bot that:
 
 ## Requirements
 
-- Python `>=3.9,<3.15`
-- A Meshtastic-compatible radio reachable by USB serial or Meshtastic TCP
+- Python `>=3.11,<3.15`
+- Access to a Meshtastic multicast UDP mesh (vnode defaults to `239.0.0.69:4403`), or an optional radio reachable by USB serial or TCP
 - Runtime dependencies:
+  - `vnode>=0.2.3,<0.3`
   - `meshtastic`
   - `meshdb`
   - `PyPubSub`
@@ -37,6 +38,61 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+## Run with Docker
+
+The included Compose setup runs vnode as `MeshPatrol` / `🚨`, stores its identity,
+thresholds, and databases in a persistent Docker volume, and serves the dashboard
+on port `5050`.
+
+Use a Linux Docker host connected to the multicast mesh for deployment. Compose
+uses host networking so vnode can join the LAN multicast group; publishing UDP
+port `4403` alone does not provide multicast connectivity. Docker Desktop 4.34+
+provides optional [host networking](https://docs.docker.com/engine/network/drivers/host/)
+under **Settings → Resources → Network → Enable host networking**, but its network
+implementation differs from Linux. Verify LAN multicast reception before relying
+on Docker Desktop for monitoring.
+
+```bash
+# Build and start in the background
+docker compose up -d --build
+
+# View startup messages and packet activity
+docker compose logs -f meshpatrol
+
+# Check container status and dashboard health
+docker compose ps
+```
+
+Open `http://<docker-host-ip>:5050` (or `http://localhost:5050` on the Docker host).
+The image runs as UID/GID `10001`, checks `/api/snapshot` for health, and shuts down
+with `SIGINT` so vnode closes its sockets and databases cleanly.
+
+The named volume is mounted at `/app/meshpatrol-data`; container rebuilds and
+restarts retain the same private key and node ID. Existing host files in
+`./meshpatrol-data` are separate from this volume and are not imported automatically.
+
+To change the channel, PSK, multicast settings, or broadcast intervals after the
+first startup:
+
+```bash
+mkdir -p meshpatrol-data
+docker compose cp meshpatrol:/app/meshpatrol-data/node.json ./meshpatrol-data/node.json
+# Edit meshpatrol-data/node.json, keeping security.private_key to retain identity.
+docker compose exec -T meshpatrol python -c 'from pathlib import Path; import sys; Path("/app/meshpatrol-data/node.json").write_text(sys.stdin.read(), encoding="utf-8")' < ./meshpatrol-data/node.json
+docker compose restart meshpatrol
+```
+
+The same process works for `thresholds.json`. MeshPatrol reapplies `MeshPatrol` and
+`🚨` to the vnode names on every startup.
+
+```bash
+# Stop and remove containers; keep the data volume
+docker compose down
+```
+
+`docker compose down --volumes` also deletes the stored identity and databases.
+The build context excludes runtime data and private keys.
+
 ## Running MeshPatrol
 
 After installation, run:
@@ -53,9 +109,22 @@ python -m meshpatrol
 
 ### Connection selection (CLI)
 
-Use one of these optional flags to pick the interface at runtime:
+By default, MeshPatrol starts an embedded [vnode](https://github.com/pdxlocations/vnode)
+with long name `MeshPatrol` and short name `🚨`. No serial or TCP connection to a
+radio is needed. A gateway must forward mesh traffic to the multicast group for
+MeshPatrol to monitor and alert nodes on the radio mesh.
+
+The identity and settings are created in `meshpatrol-data/node.json` on first run.
+Edit that file to select the channel name/PSK, multicast group/port, or broadcast
+settings. Keep the generated private key to retain the same node identity across
+restarts. MeshPatrol applies the requested names each time it starts.
+
+Use one of these optional flags to select a different config or a hardware interface:
 
 ```bash
+# Use a different vnode identity/config file
+python -m meshpatrol --vnode-file ./meshpatrol-data/node.json
+
 # Serial device path
 python -m meshpatrol --serial /dev/ttyUSB0
 
@@ -68,7 +137,7 @@ python -m meshpatrol --tcp [fe80::1]:4403
 
 On startup, MeshPatrol:
 
-- connects to your Meshtastic interface (`SerialInterface` or `TCPInterface`)
+- starts vnode, or connects to the optional serial/TCP interface
 - subscribes to `meshtastic.receive`
 - starts a web dashboard on `0.0.0.0:5050` (by default), accessible from your LAN via `http://<host-ip>:5050`
 
@@ -81,7 +150,8 @@ Threshold values are loaded from [`config/thresholds.json`](config/thresholds.js
 
 ```python
 APP_SETTINGS = {
-    "interface": "serial",
+    "interface": "vnode",
+    "vnode_file": "./meshpatrol-data/node.json",
     "port": None,
     "tcp_hostname": "127.0.0.1",
     "tcp_port": 4403,
@@ -101,7 +171,8 @@ APP_SETTINGS = {
 
 ### Key settings
 
-- `interface`: `"serial"` or `"tcp"` (used when no CLI override is provided).
+- `interface`: `"vnode"` (default), `"serial"`, or `"tcp"` (used when no CLI override is provided).
+- `vnode_file`: persistent vnode configuration and identity file. Its `meshdb.path` is relative to that file; the default stores vnode data in `meshpatrol-data/data/`.
 - `port`: serial device path. Use `None` for Meshtastic auto-detect.
 - `tcp_hostname` / `tcp_port`: TCP destination when `interface="tcp"`.
 - `thresholds_path`: JSON file for threshold configuration.
@@ -109,7 +180,7 @@ APP_SETTINGS = {
 - `default_threshold` / `threshold_overrides`: legacy fallback only, used if `thresholds_path` file is missing.
 - `alert_template`: fallback DM text used when the thresholds JSON does not define `default_alert_template`. Supports `{node_id}`, `{packet_type}`, `{count}`, `{threshold}`, `{hour_bucket}`, `{window_label}`, `{threshold_unit}`.
 - `web_ui`: enable/disable dashboard.
-- `meshdb_path`: SQLite file used by `meshdb` packet storage.
+- `meshdb_path`: SQLite file used by `meshdb` packet storage for serial/TCP. vnode manages its own packet storage using `meshdb.path` in its config.
 - `counter_db_path`: SQLite file used for rate counters and alert history.
 
 ### Threshold file format
@@ -170,7 +241,10 @@ Dashboard includes:
 
 By default, MeshPatrol creates/updates files in the working-directory `./meshpatrol-data/` folder:
 
-- `./meshpatrol-data/databases/mesh_packets.<owner_node_num>.db` (created by `meshdb`)
+- `./meshpatrol-data/node.json` (vnode settings and persistent private key)
+- `./meshpatrol-data/node.public.key` (generated public key)
+- `./meshpatrol-data/data/` (vnode packet and node databases)
+- `./meshpatrol-data/databases/mesh_packets.<owner_node_num>.db` (serial/TCP packet storage)
 - `./meshpatrol-data/databases/packet_counters.db`
 - `./meshpatrol-data/thresholds.json`
 

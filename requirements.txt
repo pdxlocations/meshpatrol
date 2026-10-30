@@ -2,3 +2,4 @@ meshtastic
 PyPubSub
 meshdb
 Flask
+vnode>=0.2.3,<0.3
