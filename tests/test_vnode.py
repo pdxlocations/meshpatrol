@@ -96,6 +96,33 @@ class RealVnodeTests(unittest.TestCase):
                       vnode.VirtualNode.NAK_TOPIC):
             pub.getDefaultTopicMgr().getOrCreateTopic(topic)
 
+    def test_numeric_vnode_sender_gets_one_alert_in_rolling_window(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app, "MeshDBAdapter"):
+            root = Path(tmp)
+            cfg = config(root)
+            cfg.thresholds = {"*": 2}
+            cfg.threshold_units = {"*": "24h"}
+            node = app.create_virtual_node(root / "node.json")
+            bot = app.PacketMonitorBot(cfg)
+            packet = {"from": 2409766760, "decoded": {"portnum": "TELEMETRY_APP"}}
+            try:
+                # Exercise vnode's real destination resolver, replacing only the wire send.
+                with patch.object(node, "_send_data_packet") as send:
+                    bot.on_receive(packet, node)
+                    send.assert_not_called()
+                    bot.on_receive(packet, node)
+                    send.assert_called_once()
+                    self.assertEqual(send.call_args.kwargs["destination"], 2409766760)
+                    self.assertTrue(send.call_args.kwargs["want_ack"])
+                    self.assertTrue(bot.counter_db.was_alerted(
+                        node_id="2409766760", packet_type="TELEMETRY_APP",
+                        hour_bucket=app.utc_hour_bucket()))
+                    bot.on_receive(packet, node)
+                    send.assert_called_once()
+            finally:
+                node.close()
+                bot.close()
+
     def test_names_identity_and_dashboard_node_lookup_survive_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

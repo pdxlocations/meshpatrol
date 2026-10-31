@@ -1213,20 +1213,26 @@ class PacketMonitorBot:
 
     @staticmethod
     def _send_dm(interface: Any, *, node_id: str, message: str) -> bool:
+        # vnode interprets decimal strings as contact names, not node numbers.
+        # Explicit !hex IDs work for both vnode and hardware interfaces.
+        node_num = int_from_node_id(node_id)
+        destination = f"!{node_num:08x}" if node_num is not None else node_id
         try:
             interface.sendText(
                 text=message,
-                destinationId=node_id,
+                destinationId=destination,
                 wantAck=True,
             )
             return True
         except TypeError:
             try:
-                interface.sendText(message, destinationId=node_id)
+                interface.sendText(message, destinationId=destination)
                 return True
             except Exception:
+                logging.exception("DM send failed for node=%s destination=%s", node_id, destination)
                 return False
         except Exception:
+            logging.exception("DM send failed for node=%s destination=%s", node_id, destination)
             return False
 
     def close(self) -> None:
